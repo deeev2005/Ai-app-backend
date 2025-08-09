@@ -44,14 +44,14 @@ async def generate_video(
             negative_prompt="worst quality, inconsistent motion, blurry",
             input_image_filepath=handle_file(temp_path),
             input_video_filepath=None,
-            height_ui=512,
-            width_ui=704,
+            height_ui=1920,
+            width_ui=1080,
             mode="image-to-video",
-            duration_ui=2,
+            duration_ui=5,
             ui_frames_to_use=9,
             seed_ui=42,
             randomize_seed=True,
-            ui_guidance_scale=1,
+            ui_guidance_scale=5,
             improve_texture_flag=True,
             api_name="/image_to_video"
         )
@@ -69,3 +69,4 @@ async def generate_video(
             status_code=500,
             content={"error": str(e)}
         )
+
