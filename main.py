@@ -3,95 +3,84 @@ import uuid
 import shutil
 import tempfile
 import json
+import requests
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from gradio_client import Client, handle_file
 from dotenv import load_dotenv
-import requests
 
-# Supabase client
+# Supabase
 from supabase import create_client as create_supabase_client
 
 # Firebase Admin
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# load .env (optional)
+# Load local .env when running locally
 load_dotenv()
 
-# --- Environment variables (must be set in Render) ---
+# --- Environment Variables ---
 HF_TOKEN = os.getenv("HF_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-GAC_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")  # e.g. /etc/secrets/service_account.json
+GAC_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")  # Path to service account JSON
 
-if HF_TOKEN is None:
+# Validation
+if not HF_TOKEN:
     raise RuntimeError("HF_TOKEN not set")
-if SUPABASE_URL is None or SUPABASE_KEY is None:
+if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set")
-if GAC_PATH is None:
-    raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS must be set to your service account JSON path")
+if not GAC_PATH:
+    raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS must be set")
+
+# Remove any accidental newline characters
+GAC_PATH = GAC_PATH.strip()
 
 # Initialize Supabase
 supabase_client = create_supabase_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Initialize Firebase Admin (using the mounted secret file)
+# Initialize Firebase Admin
 if not firebase_admin._apps:
     cred = credentials.Certificate(GAC_PATH)
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 # Initialize FastAPI
-app = FastAPI(title="AI -> Supabase -> Firestore Bridge")
+app = FastAPI(title="AI Video Generator - Supabase + Firestore")
 
+# Allow CORS (adjust for production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize Gradio/HF client
+# Hugging Face Client
 client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
 
 
 def upload_to_supabase(local_path: str, dest_folder: str = "videos") -> str:
-    """
-    Upload a file to Supabase storage and return a public URL.
-    """
+    """Uploads file to Supabase Storage and returns a public URL."""
     filename = os.path.basename(local_path)
-    dest_path = f"{dest_folder}/{uuid.uuid4().hex}_{filename}"
+    dest_path = f"{uuid.uuid4().hex}_{filename}"
 
-    # open file as bytes
     with open(local_path, "rb") as f:
-        res = supabase_client.storage.from_(dest_folder).upload(dest_path, f)
-    # res may contain info or error; attempt to get public URL
+        supabase_client.storage.from_(dest_folder).upload(dest_path, f)
+
+    # Try to get public URL
     try:
         pub = supabase_client.storage.from_(dest_folder).get_public_url(dest_path)
-        # different supabase client versions return different keys
-        public_url = (
+        return (
             pub.get("publicURL")
             or pub.get("publicUrl")
             or pub.get("public_url")
-            or None
+            or f"{SUPABASE_URL}/storage/v1/object/public/{dest_folder}/{dest_path}"
         )
-        if public_url:
-            return public_url
     except Exception:
-        pass
-
-    # If the SDK didn't return a proper public url, construct a URL:
-    # NOTE: this works if your bucket is public; otherwise you'll need signed URLs.
-    # The following pattern is typical for Supabase (storage API):
-    # https://<SUPABASE_URL>/storage/v1/object/public/<bucket>/<path>
-    try:
-        base = SUPABASE_URL.rstrip("/")
-        constructed = f"{base}/storage/v1/object/public/{dest_folder}/{dest_path}"
-        return constructed
-    except Exception:
-        raise RuntimeError("Unable to determine Supabase public URL for uploaded file")
+        return f"{SUPABASE_URL}/storage/v1/object/public/{dest_folder}/{dest_path}"
 
 
 @app.post("/generate/")
@@ -102,20 +91,18 @@ async def generate_video(
     friend_uids: str = Form(...),  # comma-separated UIDs
 ):
     """
-    Accepts image + prompt, generates video (via HF space), uploads to Supabase,
-    and writes message docs in Firestore for each friend.
+    Accepts an image and prompt, generates a video using HF,
+    uploads it to Supabase, and sends Firestore messages.
     """
     temp_dir = tempfile.mkdtemp()
     try:
-        # 1) Save incoming image locally
-        input_filename = f"{uuid.uuid4().hex}_{file.filename}"
-        input_path = os.path.join(temp_dir, input_filename)
+        # 1) Save incoming image
+        input_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{file.filename}")
         with open(input_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        # 2) Call Hugging Face / Gradio space
+        # 2) Call Hugging Face model
         try:
-            # reduce sizes/duration to avoid long times; tune as needed
             result = client.predict(
                 prompt=prompt,
                 negative_prompt="worst quality, inconsistent motion, blurry",
@@ -135,29 +122,24 @@ async def generate_video(
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": f"HF model call failed: {str(e)}"})
 
-        # 3) Extract video reference from result
+        # 3) Extract video from model output
         video_ref = None
-        if isinstance(result, list) and len(result) > 0:
+        if isinstance(result, list) and result:
             first = result[0]
             if isinstance(first, dict):
-                video_ref = first.get("video") or first.get("output") or None
+                video_ref = first.get("video") or first.get("output")
             elif isinstance(first, str):
                 video_ref = first
 
-        # If we have an HTTP URL, download it; otherwise if it's a local path or bytes, handle accordingly
         local_video_path = None
         if isinstance(video_ref, str) and video_ref.startswith("http"):
-            # download remote file
-            try:
-                r = requests.get(video_ref, timeout=120)
-                if r.status_code == 200:
-                    local_video_path = os.path.join(temp_dir, f"out_{uuid.uuid4().hex}.mp4")
-                    with open(local_video_path, "wb") as out:
-                        out.write(r.content)
-                else:
-                    return JSONResponse(status_code=500, content={"error": f"Failed to download HF output: status {r.status_code}"})
-            except Exception as e:
-                return JSONResponse(status_code=500, content={"error": f"Download failed: {str(e)}"})
+            r = requests.get(video_ref, timeout=120)
+            if r.status_code == 200:
+                local_video_path = os.path.join(temp_dir, f"out_{uuid.uuid4().hex}.mp4")
+                with open(local_video_path, "wb") as out:
+                    out.write(r.content)
+            else:
+                return JSONResponse(status_code=500, content={"error": "Failed to download HF output"})
         elif isinstance(video_ref, (bytes, bytearray)):
             local_video_path = os.path.join(temp_dir, f"out_{uuid.uuid4().hex}.mp4")
             with open(local_video_path, "wb") as out:
@@ -165,34 +147,29 @@ async def generate_video(
         elif isinstance(video_ref, str) and os.path.exists(video_ref):
             local_video_path = video_ref
         else:
-            # fallback: maybe the model returned a direct file-like blob elsewhere in result
-            # Return the whole result for debugging
             return JSONResponse(status_code=500, content={"error": "Unexpected HF response", "result": result})
 
-        if local_video_path is None:
-            return JSONResponse(status_code=500, content={"error": "No video output produced by model"})
+        if not local_video_path:
+            return JSONResponse(status_code=500, content={"error": "No video output produced"})
 
-        # 4) Upload to Supabase storage
+        # 4) Upload video to Supabase
         try:
             public_url = upload_to_supabase(local_video_path, dest_folder="videos")
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": f"Supabase upload failed: {str(e)}"})
 
-        # 5) Write to Firestore messages for each friend
+        # 5) Write Firestore messages for each friend
         friend_list = [f.strip() for f in friend_uids.split(",") if f.strip()]
         for friend_uid in friend_list:
-            # deterministic chat ID
             chat_id = f"{sender_uid}_{friend_uid}" if sender_uid < friend_uid else f"{friend_uid}_{sender_uid}"
             chat_ref = db.collection("chats").document(chat_id)
 
-            # ensure chat doc exists/updated
             chat_ref.set({
                 "participants": [sender_uid, friend_uid],
                 "lastMessage": "[AI Video]",
                 "lastMessageTime": firestore.SERVER_TIMESTAMP
             }, merge=True)
 
-            # add message
             chat_ref.collection("messages").add({
                 "senderId": sender_uid,
                 "receiverId": friend_uid,
@@ -205,8 +182,4 @@ async def generate_video(
         return JSONResponse(status_code=200, content={"status": "success", "public_video_url": public_url})
 
     finally:
-        # cleanup temp files
-        try:
-            shutil.rmtree(temp_dir)
-        except Exception:
-            pass
+        shutil.rmtree(temp_dir, ignore_errors=True)
