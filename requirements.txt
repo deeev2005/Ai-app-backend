@@ -3,4 +3,6 @@ uvicorn
 gradio_client
 python-dotenv
 python-multipart
-
+firebase-admin
+requests
+supabase
