@@ -108,8 +108,8 @@ async def generate_video(
                 negative_prompt="worst quality, inconsistent motion, blurry",
                 input_image_filepath=handle_file(input_path),
                 input_video_filepath=None,
-                height_ui=1920,
-                width_ui=1080,
+                height_ui=640,
+                width_ui=352,
                 mode="image-to-video",
                 duration_ui=5,
                 ui_frames_to_use=9,
@@ -183,4 +183,5 @@ async def generate_video(
 
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
 
