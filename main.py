@@ -268,7 +268,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         if not firebase_admin._apps:
             try:
                 # Try to initialize with service account file
-                cred = credentials.Certificate("/etc/secrets/firebase-service-account.json")
+                cred = credentials.Certificate("/etc/secrets/services")
                 firebase_admin.initialize_app(cred)
             except Exception as e:
                 logger.error(f"Failed to initialize Firebase with service account: {e}")
@@ -381,7 +381,7 @@ def _predict_video(image_path: str, prompt: str):
             height_ui=512,
             width_ui=704,
             mode="image-to-video",
-            duration_ui=5,
+            duration_ui=2,
             ui_frames_to_use=9,
             seed_ui=42,
             randomize_seed=True,
