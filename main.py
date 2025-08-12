@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")  # Use service key for server-side operations
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service key for server-side operations
 
 if not HF_TOKEN:
     logger.error("HF_TOKEN not found in environment variables")
@@ -208,25 +208,34 @@ async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> s
         logger.info(f"Uploading video to Supabase: {storage_path}")
 
         # Upload to Supabase storage
-        result = supabase.storage.from_("videos").upload(
-            path=storage_path,
-            file=video_data,
-            file_options={
-                "content-type": "video/mp4",
-                "cache-control": "3600"
-            }
-        )
-
-        if result.error:
-            raise Exception(f"Supabase upload failed: {result.error}")
+        try:
+            result = supabase.storage.from_("videos").upload(
+                path=storage_path,
+                file=video_data,
+                file_options={
+                    "content-type": "video/mp4",
+                    "cache-control": "3600"
+                }
+            )
+            logger.info(f"Upload result: {result}")
+            
+        except Exception as upload_error:
+            logger.error(f"Upload failed: {upload_error}")
+            raise Exception(f"Supabase upload failed: {upload_error}")
 
         # Get public URL
-        url_result = supabase.storage.from_("videos").get_public_url(storage_path)
-        
-        if not url_result:
-            raise Exception("Failed to get public URL")
-
-        return url_result
+        try:
+            url_result = supabase.storage.from_("videos").get_public_url(storage_path)
+            logger.info(f"Generated public URL: {url_result}")
+            
+            if not url_result:
+                raise Exception("Failed to get public URL")
+            
+            return url_result
+            
+        except Exception as url_error:
+            logger.error(f"Failed to get public URL: {url_error}")
+            raise Exception(f"Failed to get public URL: {url_error}")
 
     except Exception as e:
         logger.error(f"Failed to upload video to Supabase: {e}")
@@ -271,4 +280,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
