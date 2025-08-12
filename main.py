@@ -241,6 +241,16 @@ async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> s
             logger.error(f"Failed to get public URL: {url_error}")
             raise Exception(f"Failed to get public URL: {url_error}")
 
+            return url_result
+            
+        except Exception as url_error:
+            logger.error(f"Failed to get public URL: {url_error}")
+            raise Exception(f"Failed to get public URL: {url_error}")
+
+    except Exception as e:
+        logger.error(f"Failed to upload video to Supabase: {e}")
+        raise Exception(f"Storage upload failed: {str(e)}")
+
 async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, video_url: str, prompt: str):
     """Save chat messages with video URL to Firebase for each receiver"""
     try:
@@ -251,7 +261,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         # Initialize Firebase Admin (add your service account key)
         if not firebase_admin._apps:
             # You need to add your Firebase service account JSON file
-            cred = credentials.Certificate("/etc/secrets/services")
+            cred = credentials.Certificate("path/to/your/firebase-service-account.json")
             firebase_admin.initialize_app(cred)
         
         db = firestore.client()
@@ -338,5 +348,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
