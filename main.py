@@ -1,77 +1,106 @@
 import os
 import json
-import time
+from flask import Flask, request, jsonify
+from gradio_client import Client, handle_file
+from supabase import create_client
+from datetime import datetime
 import tempfile
-import shutil
-import subprocess
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from kaggle.api.kaggle_api_extended import KaggleApi
 
-app = FastAPI()
+app = Flask(__name__)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Load your credentials (use environment variables in Render)
+HF_TOKEN = os.environ.get("HF_TOKEN")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# Load Kaggle credentials from env or mounted secret
-KAGGLE_USERNAME = os.getenv("KAGGLE_USERNAME")
-KAGGLE_KEY = os.getenv("KAGGLE_KEY")
-KERNEL_SLUG = os.getenv("KERNEL_SLUG")  # e.g. "yourusername/your-kernel-name"
+# Initialize clients
+client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Setup Kaggle API client
-def setup_kaggle_api():
-    # Write kaggle.json file for kaggle client
-    kaggle_dir = os.path.expanduser("~/.kaggle")
-    os.makedirs(kaggle_dir, exist_ok=True)
-    with open(os.path.join(kaggle_dir, "kaggle.json"), "w") as f:
-        json.dump({"username": KAGGLE_USERNAME, "key": KAGGLE_KEY}, f)
-    os.chmod(os.path.join(kaggle_dir, "kaggle.json"), 0o600)
-    api = KaggleApi()
-    api.authenticate()
-    return api
-
-@app.post("/generate/")
-async def generate_video(
-    file: UploadFile = File(...),
-    prompt: str = Form(...),
-    sender_uid: str = Form(...),
-    friend_uids: str = Form(...),
-):
-    temp_dir = tempfile.mkdtemp()
+@app.route('/generate', methods=['POST'])
+def generate_video():
     try:
-        input_path = os.path.join(temp_dir, file.filename)
-        with open(input_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        api = setup_kaggle_api()
-
-        # Upload input file to Kaggle dataset or to somewhere accessible if needed
-        # For simplicity, let's assume kernel accesses input from a public URL or you pre-upload input elsewhere.
-
-        # Start kernel run with parameters passed via kernel metadata or environment variables
-        # Note: Kaggle API does not support passing arbitrary params directly to kernel runs
-        # So you may store inputs in a dataset, or use environment variables/secrets in kernel
-
-        # Trigger kernel run (this call blocks until complete)
-        print("Starting Kaggle kernel run...")
-        api.kernels_run(kernel=KERNEL_SLUG, wait=True, quiet=False)
-        print("Kernel run finished.")
-
-        # After run, output file should be saved in a persistent place (Supabase) by kernel itself
-        # Here, you might retrieve output metadata or have your kernel write result URL to a dataset or Firestore
-
-        # For demo, assume you get output URL from Firestore or your own method
-        # Return dummy URL for now
-        public_video_url = "https://your.supabase.storage/videos/generated_video.mp4"
-
-        return JSONResponse(content={"status": "success", "public_video_url": public_video_url})
-
+        # Get parameters from Flutter app
+        sender_uid = request.form.get('sender_uid')
+        receiver_uids = request.form.get('receiver_uids')
+        prompt = request.form.get('prompt')
+        
+        # Get uploaded image file
+        image_file = request.files.get('image')
+        if not image_file:
+            return jsonify({"error": "No image file provided"}), 400
+        
+        # Save uploaded image temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_image:
+            image_file.save(temp_image.name)
+            temp_image_path = temp_image.name
+        
+        print(f"Processing request - Sender: {sender_uid}, Prompt: {prompt}")
+        
+        # Generate video using Hugging Face API
+        result = client.predict(
+            prompt=prompt,
+            negative_prompt="worst quality, inconsistent motion, blurry",
+            input_image_filepath=handle_file(temp_image_path),
+            input_video_filepath=None,
+            height_ui=512,
+            width_ui=704,
+            mode="image-to-video",
+            duration_ui=2,
+            ui_frames_to_use=9,
+            seed_ui=42,
+            randomize_seed=True,
+            ui_guidance_scale=1,
+            improve_texture_flag=True,
+            api_name="/image_to_video"
+        )
+        
+        # Get the local video path from API response
+        local_video_path = result[0]["video"]
+        print(f"Video generated at: {local_video_path}")
+        
+        # Upload directly to Supabase videos bucket
+        bucket_name = "videos"
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        video_name = f"{sender_uid}_{timestamp}.mp4"
+        
+        # Read the generated video file and upload to Supabase
+        with open(local_video_path, "rb") as video_file:
+            upload_response = supabase.storage.from_(bucket_name).upload(
+                video_name, 
+                video_file,
+                file_options={"content-type": "video/mp4"}
+            )
+        
+        # Get public URL from Supabase
+        video_public_url = f"{SUPABASE_URL}/storage/v1/object/public/{bucket_name}/{video_name}"
+        
+        # Clean up temporary files
+        os.unlink(temp_image_path)
+        if os.path.exists(local_video_path):
+            os.unlink(local_video_path)
+        
+        # Return the public URL to Flutter app
+        response_data = {
+            "success": True,
+            "video_url": video_public_url,
+            "video_name": video_name,
+            "sender_uid": sender_uid,
+            "receiver_uids": receiver_uids.split(",") if receiver_uids else [],
+            "prompt": prompt,
+            "generated_at": timestamp
+        }
+        
+        print(f"Video uploaded successfully: {video_public_url}")
+        return jsonify(response_data)
+        
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        print(f"Error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "healthy"})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
