@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")  # Use service key for server-side operations
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")
 
 if not HF_TOKEN:
     logger.error("HF_TOKEN not found in environment variables")
@@ -155,7 +155,7 @@ async def generate_video(
         logger.info(f"Video uploaded to Supabase: {video_url}")
 
         # Save chat messages to Firebase for each receiver
-        receiver_list = receiver_uids.split(",")
+        receiver_list = [uid.strip() for uid in receiver_uids.split(",") if uid.strip()]
         await _save_chat_messages_to_firebase(sender_uid, receiver_list, video_url, prompt)
 
         return JSONResponse({
@@ -241,12 +241,6 @@ async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> s
             logger.error(f"Failed to get public URL: {url_error}")
             raise Exception(f"Failed to get public URL: {url_error}")
 
-            return url_result
-            
-        except Exception as url_error:
-            logger.error(f"Failed to get public URL: {url_error}")
-            raise Exception(f"Failed to get public URL: {url_error}")
-
     except Exception as e:
         logger.error(f"Failed to upload video to Supabase: {e}")
         raise Exception(f"Storage upload failed: {str(e)}")
@@ -257,55 +251,111 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         import firebase_admin
         from firebase_admin import credentials, firestore
         from datetime import datetime
+        import pytz
         
-        # Initialize Firebase Admin (add your service account key)
+        # Initialize Firebase Admin if not already done
         if not firebase_admin._apps:
-            # You need to add your Firebase service account JSON file
-            cred = credentials.Certificate("/etc/secrets/services")
-            firebase_admin.initialize_app(cred)
+            try:
+                # Try to initialize with service account file
+                cred = credentials.Certificate("/etc/secrets/firebase-service-account.json")
+                firebase_admin.initialize_app(cred)
+            except Exception as e:
+                logger.error(f"Failed to initialize Firebase with service account: {e}")
+                # If service account file not found, try with application default credentials
+                try:
+                    cred = credentials.ApplicationDefault()
+                    firebase_admin.initialize_app(cred)
+                except Exception as e2:
+                    logger.error(f"Failed to initialize Firebase with default credentials: {e2}")
+                    raise Exception("Firebase initialization failed")
         
         db = firestore.client()
         
-        # Current timestamp
-        timestamp = datetime.now()
+        # Current timestamp with timezone
+        ist = pytz.timezone('Asia/Kolkata')
+        timestamp = datetime.now(ist)
+        
+        logger.info(f"Saving video messages to Firebase for {len(receiver_list)} receivers")
         
         for receiver_id in receiver_list:
-            receiver_id = receiver_id.strip()  # Clean whitespace
-            
-            # Create or get chat document ID (consistent format)
-            chat_participants = sorted([sender_uid, receiver_id])
-            chat_id = f"{chat_participants[0]}_{chat_participants[1]}"
-            
-            # Create message document
-            message_data = {
-                "senderId": sender_uid,
-                "receiverId": receiver_id,
-                "text": prompt,
-                "videoUrl": video_url,  # Add video URL field
-                "messageType": "video",  # Add message type
-                "timestamp": timestamp,
-                "isRead": False
-            }
-            
-            # Add message to messages collection
-            message_ref = db.collection("messages").add(message_data)
-            logger.info(f"Message saved to Firebase for receiver {receiver_id}: {message_ref[1].id}")
-            
-            # Update or create chat document
-            chat_ref = db.collection("chats").document(chat_id)
-            chat_data = {
-                "participants": [sender_uid, receiver_id],
-                "lastMessage": prompt,
-                "lastMessageType": "video",
-                "lastMessageTimestamp": timestamp,
-                "lastSenderId": sender_uid
-            }
-            
-            chat_ref.set(chat_data, merge=True)
-            logger.info(f"Chat updated for chat_id: {chat_id}")
-            
+            if not receiver_id:  # Skip empty receiver IDs
+                continue
+                
+            try:
+                logger.info(f"Processing message for receiver: {receiver_id}")
+                
+                # Create message document with all required fields
+                message_data = {
+                    "senderId": sender_uid,
+                    "receiverId": receiver_id,
+                    "text": prompt,  # The prompt as message text
+                    "videoUrl": video_url,  # Supabase video URL
+                    "messageType": "video",  # Message type
+                    "timestamp": timestamp,
+                    "isRead": False,
+                    "createdAt": timestamp,
+                    "updatedAt": timestamp
+                }
+                
+                # Add message to messages collection
+                doc_ref, doc = db.collection("messages").add(message_data)
+                message_id = doc.id
+                logger.info(f"Message saved to Firebase with ID: {message_id} for receiver {receiver_id}")
+                
+                # Create or update chat document
+                # Use consistent chat ID format (smaller UID first)
+                chat_participants = sorted([sender_uid, receiver_id])
+                chat_id = f"{chat_participants[0]}_{chat_participants[1]}"
+                
+                chat_data = {
+                    "participants": [sender_uid, receiver_id],
+                    "participantIds": chat_participants,  # For easier querying
+                    "lastMessage": prompt,
+                    "lastMessageType": "video",
+                    "lastMessageTimestamp": timestamp,
+                    "lastSenderId": sender_uid,
+                    "lastVideoUrl": video_url,  # Store last video URL
+                    "updatedAt": timestamp,
+                    "unreadCount": {
+                        receiver_id: firestore.Increment(1)  # Increment unread count for receiver
+                    }
+                }
+                
+                # Create chat if it doesn't exist, or update if it does
+                chat_ref = db.collection("chats").document(chat_id)
+                
+                # Check if chat exists
+                chat_doc = chat_ref.get()
+                if chat_doc.exists:
+                    # Update existing chat
+                    chat_ref.update({
+                        "lastMessage": prompt,
+                        "lastMessageType": "video",
+                        "lastMessageTimestamp": timestamp,
+                        "lastSenderId": sender_uid,
+                        "lastVideoUrl": video_url,
+                        "updatedAt": timestamp,
+                        f"unreadCount.{receiver_id}": firestore.Increment(1)
+                    })
+                    logger.info(f"Updated existing chat: {chat_id}")
+                else:
+                    # Create new chat
+                    chat_data["createdAt"] = timestamp
+                    chat_data["unreadCount"] = {
+                        sender_uid: 0,
+                        receiver_id: 1
+                    }
+                    chat_ref.set(chat_data)
+                    logger.info(f"Created new chat: {chat_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
+                continue  # Continue with other receivers even if one fails
+        
+        logger.info("Successfully saved all video messages to Firebase")
+        
     except Exception as e:
-        logger.error(f"Failed to save chat messages to Firebase: {e}")
+        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
         # Don't raise exception here - video generation was successful
         # Just log the error and continue
 
@@ -348,5 +398,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
