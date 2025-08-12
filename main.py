@@ -267,18 +267,12 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         # Initialize Firebase Admin if not already done
         if not firebase_admin._apps:
             try:
-                # Try to initialize with service account file
+                # Use the specified service account file path
                 cred = credentials.Certificate("/etc/secrets/services")
                 firebase_admin.initialize_app(cred)
             except Exception as e:
                 logger.error(f"Failed to initialize Firebase with service account: {e}")
-                # If service account file not found, try with application default credentials
-                try:
-                    cred = credentials.ApplicationDefault()
-                    firebase_admin.initialize_app(cred)
-                except Exception as e2:
-                    logger.error(f"Failed to initialize Firebase with default credentials: {e2}")
-                    raise Exception("Firebase initialization failed")
+                raise Exception("Firebase initialization failed")
         
         db = firestore.client()
         
