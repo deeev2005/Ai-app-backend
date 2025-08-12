@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service key for server-side operations
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")  # Use service key for server-side operations
 
 if not HF_TOKEN:
     logger.error("HF_TOKEN not found in environment variables")
@@ -338,3 +338,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
