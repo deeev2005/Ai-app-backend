@@ -7,4 +7,6 @@ firebase-admin
 flask
 requests
 supabase
+pytz
+
 
