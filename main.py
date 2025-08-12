@@ -118,6 +118,17 @@ async def generate_video(
             content = await file.read()
             buffer.write(content)
 
+        # Rotate image 90 degrees clockwise to fix phone orientation
+        from PIL import Image
+        try:
+            with Image.open(temp_image_path) as img:
+                # Rotate 90 degrees clockwise (270 degrees counter-clockwise)
+                rotated_img = img.rotate(-90, expand=True)
+                rotated_img.save(temp_image_path)
+                logger.info(f"Image rotated 90 degrees clockwise")
+        except Exception as e:
+            logger.warning(f"Failed to rotate image: {e}, proceeding with original image")
+
         logger.info(f"Image saved to {temp_image_path}")
 
         # Validate file size (optional)
@@ -370,7 +381,7 @@ def _predict_video(image_path: str, prompt: str):
             height_ui=512,
             width_ui=704,
             mode="image-to-video",
-            duration_ui=2,
+            duration_ui=5,
             ui_frames_to_use=9,
             seed_ui=42,
             randomize_seed=True,
@@ -398,4 +409,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
