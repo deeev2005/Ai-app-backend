@@ -251,7 +251,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         # Initialize Firebase Admin (add your service account key)
         if not firebase_admin._apps:
             # You need to add your Firebase service account JSON file
-            cred = credentials.Certificate("path/to/your/firebase-service-account.json")
+            cred = credentials.Certificate("/etc/secrets/services")
             firebase_admin.initialize_app(cred)
         
         db = firestore.client()
@@ -338,4 +338,5 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
