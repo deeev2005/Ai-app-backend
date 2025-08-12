@@ -9,19 +9,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from gradio_client import Client, handle_file
 from dotenv import load_dotenv
+from supabase import create_client, Client as SupabaseClient
 import uvicorn
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load HF token from .env
+# Load environment variables
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service key for server-side operations
 
 if not HF_TOKEN:
     logger.error("HF_TOKEN not found in environment variables")
     raise ValueError("HF_TOKEN is required")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    logger.error("SUPABASE_URL or SUPABASE_SERVICE_KEY not found in environment variables")
+    raise ValueError("Supabase credentials are required")
 
 app = FastAPI(title="AI Video Generator", version="1.0.0")
 
@@ -34,24 +41,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global client - initialize with error handling
+# Global clients
 client = None
+supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global client
+    global client, supabase
     try:
         logger.info("Initializing Gradio client...")
         client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
         logger.info("Gradio client initialized successfully")
+        
+        logger.info("Initializing Supabase client...")
+        supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        logger.info("Supabase client initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize Gradio client: {e}")
+        logger.error(f"Failed to initialize clients: {e}")
         raise
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "client_ready": client is not None}
+    return {
+        "status": "healthy", 
+        "client_ready": client is not None,
+        "supabase_ready": supabase is not None
+    }
 
 @app.post("/generate/")
 async def generate_video(
@@ -61,7 +77,8 @@ async def generate_video(
     receiver_uids: str = Form(...)
 ):
     """Generate video from image and prompt"""
-    temp_path = None
+    temp_image_path = None
+    temp_video_path = None
     
     try:
         # Improved image validation
@@ -94,40 +111,48 @@ async def generate_video(
         # Save uploaded image temporarily
         image_id = str(uuid.uuid4())
         file_extension = Path(filename).suffix or '.jpg'
-        temp_path = temp_dir / f"{image_id}{file_extension}"
+        temp_image_path = temp_dir / f"{image_id}{file_extension}"
 
         # Save file
-        with open(temp_path, "wb") as buffer:
+        with open(temp_image_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
 
-        logger.info(f"Image saved to {temp_path}")
+        logger.info(f"Image saved to {temp_image_path}")
 
         # Validate file size (optional)
-        file_size = temp_path.stat().st_size
+        file_size = temp_image_path.stat().st_size
         if file_size > 10 * 1024 * 1024:  # 10MB limit
             raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
-        # Check if client is available
+        # Check if clients are available
         if client is None:
             raise HTTPException(status_code=503, detail="AI service not available")
+        
+        if supabase is None:
+            raise HTTPException(status_code=503, detail="Storage service not available")
 
         # Call HF model with timeout
         logger.info("Calling Hugging Face model...")
         
         # Run the prediction with asyncio timeout
         result = await asyncio.wait_for(
-            asyncio.to_thread(_predict_video, str(temp_path), prompt),
+            asyncio.to_thread(_predict_video, str(temp_image_path), prompt),
             timeout=300.0  # 5 minutes timeout
         )
 
         if not result or len(result) < 2:
             raise HTTPException(status_code=500, detail="Invalid response from AI model")
 
-        video_url = result[0].get("video") if isinstance(result[0], dict) else result[0]
+        local_video_path = result[0].get("video") if isinstance(result[0], dict) else result[0]
         seed_used = result[1] if len(result) > 1 else "unknown"
 
-        logger.info(f"Video generated successfully: {video_url}")
+        logger.info(f"Video generated locally: {local_video_path}")
+
+        # Upload video to Supabase storage
+        video_url = await _upload_video_to_supabase(local_video_path, sender_uid)
+        
+        logger.info(f"Video uploaded to Supabase: {video_url}")
 
         return JSONResponse({
             "success": True,
@@ -156,13 +181,56 @@ async def generate_video(
         )
     
     finally:
-        # Cleanup temporary file
-        if temp_path and temp_path.exists():
-            try:
-                temp_path.unlink()
-                logger.info(f"Cleaned up temp file: {temp_path}")
-            except Exception as e:
-                logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
+        # Cleanup temporary files
+        for temp_path in [temp_image_path, temp_video_path]:
+            if temp_path and Path(temp_path).exists():
+                try:
+                    Path(temp_path).unlink()
+                    logger.info(f"Cleaned up temp file: {temp_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
+
+async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> str:
+    """Upload video to Supabase storage and return public URL"""
+    try:
+        video_path = Path(local_video_path)
+        if not video_path.exists():
+            raise Exception(f"Video file not found: {local_video_path}")
+
+        # Generate unique filename for Supabase storage
+        video_id = str(uuid.uuid4())
+        storage_path = f"videos/{sender_uid}/{video_id}.mp4"
+
+        # Read video file
+        with open(video_path, "rb") as video_file:
+            video_data = video_file.read()
+
+        logger.info(f"Uploading video to Supabase: {storage_path}")
+
+        # Upload to Supabase storage
+        result = supabase.storage.from_("videos").upload(
+            path=storage_path,
+            file=video_data,
+            file_options={
+                "content-type": "video/mp4",
+                "cache-control": "3600"
+            }
+        )
+
+        if result.error:
+            raise Exception(f"Supabase upload failed: {result.error}")
+
+        # Get public URL
+        url_result = supabase.storage.from_("videos").get_public_url(storage_path)
+        
+        if not url_result:
+            raise Exception("Failed to get public URL")
+
+        return url_result
+
+    except Exception as e:
+        logger.error(f"Failed to upload video to Supabase: {e}")
+        raise Exception(f"Storage upload failed: {str(e)}")
 
 def _predict_video(image_path: str, prompt: str):
     """Synchronous function to call the Gradio client"""
