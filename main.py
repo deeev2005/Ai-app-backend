@@ -64,9 +64,20 @@ async def generate_video(
     temp_path = None
     
     try:
-        # Validate inputs
-        if not file.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
+        # Improved image validation
+        content_type = file.content_type or ""
+        filename = file.filename or ""
+        
+        # Check content type OR file extension
+        valid_content_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+        
+        is_valid_content_type = any(content_type.startswith(ct) for ct in ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/'])
+        is_valid_extension = any(filename.lower().endswith(ext) for ext in valid_extensions)
+        
+        if not (is_valid_content_type or is_valid_extension):
+            logger.warning(f"Invalid file - Content-Type: {content_type}, Filename: {filename}")
+            raise HTTPException(status_code=400, detail="File must be an image (jpg, png, webp)")
         
         if len(prompt.strip()) == 0:
             raise HTTPException(status_code=400, detail="Prompt cannot be empty")
@@ -74,6 +85,7 @@ async def generate_video(
         logger.info(f"Starting video generation for user {sender_uid}")
         logger.info(f"Prompt: {prompt}")
         logger.info(f"Receivers: {receiver_uids}")
+        logger.info(f"File info - Content-Type: {content_type}, Filename: {filename}")
 
         # Create temp directory if it doesn't exist
         temp_dir = Path("/tmp")
@@ -81,7 +93,7 @@ async def generate_video(
 
         # Save uploaded image temporarily
         image_id = str(uuid.uuid4())
-        file_extension = Path(file.filename).suffix or '.jpg'
+        file_extension = Path(filename).suffix or '.jpg'
         temp_path = temp_dir / f"{image_id}{file_extension}"
 
         # Save file
