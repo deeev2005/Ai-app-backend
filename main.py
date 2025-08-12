@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")  # Use service key for server-side operations
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service key for server-side operations
 
 if not HF_TOKEN:
     logger.error("HF_TOKEN not found in environment variables")
@@ -154,12 +154,16 @@ async def generate_video(
         
         logger.info(f"Video uploaded to Supabase: {video_url}")
 
+        # Save chat messages to Firebase for each receiver
+        receiver_list = receiver_uids.split(",")
+        await _save_chat_messages_to_firebase(sender_uid, receiver_list, video_url, prompt)
+
         return JSONResponse({
             "success": True,
             "video_url": video_url,
             "seed": seed_used,
             "sender_uid": sender_uid,
-            "receiver_uids": receiver_uids.split(",")
+            "receiver_uids": receiver_list
         })
 
     except asyncio.TimeoutError:
@@ -237,9 +241,63 @@ async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> s
             logger.error(f"Failed to get public URL: {url_error}")
             raise Exception(f"Failed to get public URL: {url_error}")
 
+async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, video_url: str, prompt: str):
+    """Save chat messages with video URL to Firebase for each receiver"""
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+        from datetime import datetime
+        
+        # Initialize Firebase Admin (add your service account key)
+        if not firebase_admin._apps:
+            # You need to add your Firebase service account JSON file
+            cred = credentials.Certificate("path/to/your/firebase-service-account.json")
+            firebase_admin.initialize_app(cred)
+        
+        db = firestore.client()
+        
+        # Current timestamp
+        timestamp = datetime.now()
+        
+        for receiver_id in receiver_list:
+            receiver_id = receiver_id.strip()  # Clean whitespace
+            
+            # Create or get chat document ID (consistent format)
+            chat_participants = sorted([sender_uid, receiver_id])
+            chat_id = f"{chat_participants[0]}_{chat_participants[1]}"
+            
+            # Create message document
+            message_data = {
+                "senderId": sender_uid,
+                "receiverId": receiver_id,
+                "text": prompt,
+                "videoUrl": video_url,  # Add video URL field
+                "messageType": "video",  # Add message type
+                "timestamp": timestamp,
+                "isRead": False
+            }
+            
+            # Add message to messages collection
+            message_ref = db.collection("messages").add(message_data)
+            logger.info(f"Message saved to Firebase for receiver {receiver_id}: {message_ref[1].id}")
+            
+            # Update or create chat document
+            chat_ref = db.collection("chats").document(chat_id)
+            chat_data = {
+                "participants": [sender_uid, receiver_id],
+                "lastMessage": prompt,
+                "lastMessageType": "video",
+                "lastMessageTimestamp": timestamp,
+                "lastSenderId": sender_uid
+            }
+            
+            chat_ref.set(chat_data, merge=True)
+            logger.info(f"Chat updated for chat_id: {chat_id}")
+            
     except Exception as e:
-        logger.error(f"Failed to upload video to Supabase: {e}")
-        raise Exception(f"Storage upload failed: {str(e)}")
+        logger.error(f"Failed to save chat messages to Firebase: {e}")
+        # Don't raise exception here - video generation was successful
+        # Just log the error and continue
 
 def _predict_video(image_path: str, prompt: str):
     """Synchronous function to call the Gradio client"""
@@ -252,11 +310,11 @@ def _predict_video(image_path: str, prompt: str):
             height_ui=512,
             width_ui=704,
             mode="image-to-video",
-            duration_ui=5,
+            duration_ui=2,
             ui_frames_to_use=9,
             seed_ui=42,
             randomize_seed=True,
-            ui_guidance_scale=5,
+            ui_guidance_scale=1,
             improve_texture_flag=True,
             api_name="/image_to_video"
         )
@@ -280,6 +338,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
-
