@@ -306,12 +306,17 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                     "videoStatus": "uploaded"  # Status of video (uploaded, processing, failed)
                 }
                 
-                # Add message to messages collection
-                doc_ref = db.collection("messages").add(message_data)
+                # Save message to chats/{receiver_id}/messages/ collection
+                doc_ref = db.collection("chats").document(receiver_id).collection("messages").add(message_data)
                 message_id = doc_ref[1].id
-                logger.info(f"Video message saved to Firebase with ID: {message_id} for receiver {receiver_id}")
+                logger.info(f"Video message saved to chats/{receiver_id}/messages/ with ID: {message_id}")
                 
-                # Create or update chat document
+                # Also save to sender's chat collection for their own reference
+                doc_ref_sender = db.collection("chats").document(sender_uid).collection("messages").add(message_data)
+                sender_message_id = doc_ref_sender[1].id
+                logger.info(f"Video message saved to chats/{sender_uid}/messages/ with ID: {sender_message_id}")
+                
+                # Create or update chat document (keeping original chat logic for main chat list)
                 # Use consistent chat ID format (smaller UID first)
                 chat_participants = sorted([sender_uid, receiver_id])
                 chat_id = f"{chat_participants[0]}_{chat_participants[1]}"
@@ -413,4 +418,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
