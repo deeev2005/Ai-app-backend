@@ -382,8 +382,8 @@ def _predict_video(image_path: str, prompt: str):
             negative_prompt="worst quality, inconsistent motion, blurry, artifacts",
             input_image_filepath=handle_file(image_path),
             input_video_filepath=None,
-            height_ui=512,
-            width_ui=704,
+            height_ui=960,
+            width_ui=544,
             mode="image-to-video",
             duration_ui=2,
             ui_frames_to_use=9,
@@ -413,3 +413,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
