@@ -43,15 +43,20 @@ app.add_middleware(
 
 # Global clients
 client = None
+audio_client = None
 supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global client, supabase
+    global client, audio_client, supabase
     try:
         logger.info("Initializing Gradio client...")
         client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
         logger.info("Gradio client initialized successfully")
+        
+        logger.info("Initializing Audio Gradio client...")
+        audio_client = Client("fvbarros/facebook", hf_token=HF_TOKEN)
+        logger.info("Audio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -66,6 +71,7 @@ async def health_check():
     return {
         "status": "healthy", 
         "client_ready": client is not None,
+        "audio_client_ready": audio_client is not None,
         "supabase_ready": supabase is not None
     }
 
@@ -76,9 +82,11 @@ async def generate_video(
     sender_uid: str = Form(...),
     receiver_uids: str = Form(...)
 ):
-    """Generate video from image and prompt"""
+    """Generate video from image and prompt, add audio, then merge them"""
     temp_image_path = None
     temp_video_path = None
+    temp_audio_path = None
+    temp_merged_path = None
     
     try:
         # Improved image validation
@@ -138,32 +146,56 @@ async def generate_video(
 
         # Check if clients are available
         if client is None:
-            raise HTTPException(status_code=503, detail="AI service not available")
+            raise HTTPException(status_code=503, detail="AI video service not available")
+        
+        if audio_client is None:
+            raise HTTPException(status_code=503, detail="AI audio service not available")
         
         if supabase is None:
             raise HTTPException(status_code=503, detail="Storage service not available")
 
-        # Call HF model with timeout
-        logger.info("Calling Hugging Face model...")
+        # Start both video and audio generation concurrently
+        logger.info("Starting video and audio generation concurrently...")
         
-        # Run the prediction with asyncio timeout
-        result = await asyncio.wait_for(
-            asyncio.to_thread(_predict_video, str(temp_image_path), prompt),
-            timeout=300.0  # 5 minutes timeout
+        # Create tasks for both generations
+        video_task = asyncio.create_task(
+            asyncio.wait_for(
+                asyncio.to_thread(_predict_video, str(temp_image_path), prompt),
+                timeout=300.0  # 5 minutes timeout
+            )
+        )
+        
+        audio_task = asyncio.create_task(
+            asyncio.wait_for(
+                asyncio.to_thread(_predict_audio, prompt),
+                timeout=300.0  # 5 minutes timeout
+            )
         )
 
-        if not result or len(result) < 2:
-            raise HTTPException(status_code=500, detail="Invalid response from AI model")
+        # Wait for both tasks to complete
+        video_result, audio_result = await asyncio.gather(video_task, audio_task)
 
-        local_video_path = result[0].get("video") if isinstance(result[0], dict) else result[0]
-        seed_used = result[1] if len(result) > 1 else "unknown"
+        if not video_result or len(video_result) < 2:
+            raise HTTPException(status_code=500, detail="Invalid response from video AI model")
+
+        if not audio_result:
+            raise HTTPException(status_code=500, detail="Invalid response from audio AI model")
+
+        local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
+        seed_used = video_result[1] if len(video_result) > 1 else "unknown"
+        local_audio_path = audio_result
 
         logger.info(f"Video generated locally: {local_video_path}")
+        logger.info(f"Audio generated locally: {local_audio_path}")
 
-        # Upload video to Supabase storage
-        video_url = await _upload_video_to_supabase(local_video_path, sender_uid)
+        # Merge video and audio
+        merged_video_path = await _merge_video_audio(local_video_path, local_audio_path)
+        logger.info(f"Video and audio merged: {merged_video_path}")
+
+        # Upload merged video to Supabase storage
+        video_url = await _upload_video_to_supabase(merged_video_path, sender_uid)
         
-        logger.info(f"Video uploaded to Supabase: {video_url}")
+        logger.info(f"Merged video uploaded to Supabase: {video_url}")
 
         # Save chat messages to Firebase for each receiver
         receiver_list = [uid.strip() for uid in receiver_uids.split(",") if uid.strip()]
@@ -178,10 +210,10 @@ async def generate_video(
         })
 
     except asyncio.TimeoutError:
-        logger.error("Video generation timed out after 5 minutes")
+        logger.error("Video/Audio generation timed out after 5 minutes")
         raise HTTPException(
             status_code=408, 
-            detail="Video generation timed out. Please try with a simpler prompt or smaller image."
+            detail="Video/Audio generation timed out. Please try with a simpler prompt or smaller image."
         )
     
     except HTTPException:
@@ -197,13 +229,59 @@ async def generate_video(
     
     finally:
         # Cleanup temporary files
-        for temp_path in [temp_image_path, temp_video_path]:
+        for temp_path in [temp_image_path, temp_video_path, temp_audio_path, temp_merged_path]:
             if temp_path and Path(temp_path).exists():
                 try:
                     Path(temp_path).unlink()
                     logger.info(f"Cleaned up temp file: {temp_path}")
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
+
+async def _merge_video_audio(video_path: str, audio_path: str) -> str:
+    """Merge video and audio files using ffmpeg"""
+    try:
+        import subprocess
+        
+        # Generate output path
+        temp_dir = Path("/tmp")
+        output_id = str(uuid.uuid4())
+        merged_path = temp_dir / f"{output_id}_merged.mp4"
+        
+        logger.info(f"Merging video {video_path} with audio {audio_path}")
+        
+        # Use ffmpeg to merge video and audio
+        cmd = [
+            'ffmpeg', '-y',  # -y to overwrite output file
+            '-i', video_path,  # input video
+            '-i', audio_path,  # input audio
+            '-c:v', 'copy',    # copy video codec (no re-encoding)
+            '-c:a', 'aac',     # encode audio to AAC
+            '-strict', 'experimental',
+            '-shortest',       # finish when shortest stream ends
+            str(merged_path)
+        ]
+        
+        # Run ffmpeg command
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=120  # 2 minute timeout for merging
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed: {result.stderr}")
+            raise Exception(f"Video-audio merging failed: {result.stderr}")
+        
+        if not merged_path.exists():
+            raise Exception("Merged video file was not created")
+        
+        logger.info(f"Successfully merged video and audio: {merged_path}")
+        return str(merged_path)
+        
+    except Exception as e:
+        logger.error(f"Failed to merge video and audio: {e}")
+        raise Exception(f"Video-audio merging failed: {str(e)}")
 
 async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> str:
     """Upload video to Supabase storage and return public URL"""
@@ -400,6 +478,24 @@ def _predict_video(image_path: str, prompt: str):
         )
     except Exception as e:
         logger.error(f"Gradio client prediction failed: {e}")
+        raise
+
+def _predict_audio(prompt: str):
+    """Synchronous function to call the Audio Gradio client"""
+    try:
+        audio_prompt = f"generate 2 sec audio for {prompt}"
+        logger.info(f"Generating audio with prompt: {audio_prompt}")
+        
+        result = audio_client.predict(
+            prompt=audio_prompt,
+            api_name="/generate_sound_effect"
+        )
+        
+        logger.info(f"Audio generation result: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Audio Gradio client prediction failed: {e}")
         raise
 
 @app.exception_handler(Exception)
