@@ -161,14 +161,14 @@ async def generate_video(
         video_task = asyncio.create_task(
             asyncio.wait_for(
                 asyncio.to_thread(_predict_video, str(temp_image_path), prompt),
-                timeout=300.0  # 5 minutes timeout
+                timeout=600.0  # 5 minutes timeout
             )
         )
         
         audio_task = asyncio.create_task(
             asyncio.wait_for(
                 asyncio.to_thread(_predict_audio, prompt),
-                timeout=300.0  # 5 minutes timeout
+                timeout=600.0  # 5 minutes timeout
             )
         )
 
@@ -511,6 +511,7 @@ if __name__ == "__main__":
         app, 
         host="0.0.0.0", 
         port=8000,
-        timeout_keep_alive=300,  # 5 minutes keep alive
+        timeout_keep_alive=600,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
