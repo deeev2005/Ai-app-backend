@@ -43,20 +43,15 @@ app.add_middleware(
 
 # Global clients
 client = None
-audio_client = None
 supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global client, audio_client, supabase
+    global client, supabase
     try:
         logger.info("Initializing Gradio client...")
-        client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
+        client = Client("multimodalart/Qwen-Image-Edit-Fast", hf_token=HF_TOKEN)
         logger.info("Gradio client initialized successfully")
-        
-        logger.info("Initializing Audio Gradio client...")
-        audio_client = Client("fvbarros/facebook", hf_token=HF_TOKEN)
-        logger.info("Audio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -71,22 +66,19 @@ async def health_check():
     return {
         "status": "healthy", 
         "client_ready": client is not None,
-        "audio_client_ready": audio_client is not None,
         "supabase_ready": supabase is not None
     }
 
 @app.post("/generate/")
-async def generate_video(
+async def generate_image(
     file: UploadFile = File(...),
     prompt: str = Form(...),
     sender_uid: str = Form(...),
     receiver_uids: str = Form(...)
 ):
-    """Generate video from image and prompt, add audio, then merge them"""
+    """Generate image from image and prompt using Qwen-Image-Edit-Fast"""
     temp_image_path = None
     temp_video_path = None
-    temp_audio_path = None
-    temp_merged_path = None
     
     try:
         # Improved image validation
@@ -107,7 +99,7 @@ async def generate_video(
         if len(prompt.strip()) == 0:
             raise HTTPException(status_code=400, detail="Prompt cannot be empty")
 
-        logger.info(f"Starting video generation for user {sender_uid}")
+        logger.info(f"Starting image generation for user {sender_uid}")
         logger.info(f"Prompt: {prompt}")
         logger.info(f"Receivers: {receiver_uids}")
         logger.info(f"File info - Content-Type: {content_type}, Filename: {filename}")
@@ -131,7 +123,7 @@ async def generate_video(
         try:
             with Image.open(temp_image_path) as img:
                 # Rotate 90 degrees clockwise (270 degrees counter-clockwise)
-                rotated_img = img.rotate(-90, expand=True)
+                rotated_img = img.rotate(0, expand=True)
                 rotated_img.save(temp_image_path)
                 logger.info(f"Image rotated 90 degrees clockwise")
         except Exception as e:
@@ -146,74 +138,49 @@ async def generate_video(
 
         # Check if clients are available
         if client is None:
-            raise HTTPException(status_code=503, detail="AI video service not available")
-        
-        if audio_client is None:
-            raise HTTPException(status_code=503, detail="AI audio service not available")
+            raise HTTPException(status_code=503, detail="AI service not available")
         
         if supabase is None:
             raise HTTPException(status_code=503, detail="Storage service not available")
 
-        # Start both video and audio generation concurrently
-        logger.info("Starting video and audio generation concurrently...")
+        logger.info("Calling Hugging Face Qwen model...")
         
-        # Create tasks for both generations
-        video_task = asyncio.create_task(
-            asyncio.wait_for(
-                asyncio.to_thread(_predict_video, str(temp_image_path), prompt),
-                timeout=600.0  # 5 minutes timeout
-            )
-        )
-        
-        audio_task = asyncio.create_task(
-            asyncio.wait_for(
-                asyncio.to_thread(_predict_audio, prompt),
-                timeout=600.0  # 5 minutes timeout
-            )
+        # Run the prediction with asyncio timeout
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_predict_image, str(temp_image_path), prompt),
+            timeout=300.0  # 5 minutes timeout
         )
 
-        # Wait for both tasks to complete
-        video_result, audio_result = await asyncio.gather(video_task, audio_task)
+        if not result or len(result) < 2:
+            raise HTTPException(status_code=500, detail="Invalid response from AI model")
 
-        if not video_result or len(video_result) < 2:
-            raise HTTPException(status_code=500, detail="Invalid response from video AI model")
+        local_video_path = result[0].get("path") if isinstance(result[0], dict) else result[0]
+        seed_used = result[1] if len(result) > 1 else "unknown"
 
-        if not audio_result:
-            raise HTTPException(status_code=500, detail="Invalid response from audio AI model")
+        logger.info(f"Image generated locally: {local_video_path}")
 
-        local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
-        seed_used = video_result[1] if len(video_result) > 1 else "unknown"
-        local_audio_path = audio_result
-
-        logger.info(f"Video generated locally: {local_video_path}")
-        logger.info(f"Audio generated locally: {local_audio_path}")
-
-        # Merge video and audio
-        merged_video_path = await _merge_video_audio(local_video_path, local_audio_path)
-        logger.info(f"Video and audio merged: {merged_video_path}")
-
-        # Upload merged video to Supabase storage
-        video_url = await _upload_video_to_supabase(merged_video_path, sender_uid)
+        # Upload image to Supabase storage
+        image_url = await _upload_media_to_supabase(local_video_path, sender_uid, "image")
         
-        logger.info(f"Merged video uploaded to Supabase: {video_url}")
+        logger.info(f"Image uploaded to Supabase: {image_url}")
 
         # Save chat messages to Firebase for each receiver
         receiver_list = [uid.strip() for uid in receiver_uids.split(",") if uid.strip()]
-        await _save_chat_messages_to_firebase(sender_uid, receiver_list, video_url, prompt)
+        await _save_chat_messages_to_firebase(sender_uid, receiver_list, image_url, prompt)
 
         return JSONResponse({
             "success": True,
-            "video_url": video_url,
+            "image_url": image_url,
             "seed": seed_used,
             "sender_uid": sender_uid,
             "receiver_uids": receiver_list
         })
 
     except asyncio.TimeoutError:
-        logger.error("Video/Audio generation timed out after 5 minutes")
+        logger.error("Image generation timed out after 5 minutes")
         raise HTTPException(
             status_code=408, 
-            detail="Video/Audio generation timed out. Please try with a simpler prompt or smaller image."
+            detail="Image generation timed out. Please try with a simpler prompt or smaller image."
         )
     
     except HTTPException:
@@ -224,12 +191,12 @@ async def generate_video(
         logger.error(f"Error generating video: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate video: {str(e)}"
+            detail=f"Failed to generate image: {str(e)}"
         )
     
     finally:
         # Cleanup temporary files
-        for temp_path in [temp_image_path, temp_video_path, temp_audio_path, temp_merged_path]:
+        for temp_path in [temp_image_path, temp_video_path]:
             if temp_path and Path(temp_path).exists():
                 try:
                     Path(temp_path).unlink()
@@ -237,76 +204,51 @@ async def generate_video(
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
 
-async def _merge_video_audio(video_path: str, audio_path: str) -> str:
-    """Merge video and audio files using ffmpeg"""
+async def _upload_media_to_supabase(local_media_path: str, sender_uid: str, media_type: str = "video") -> str:
+    """Upload media (video or image) to Supabase storage and return public URL"""
     try:
-        import subprocess
-        
-        # Generate output path
-        temp_dir = Path("/tmp")
-        output_id = str(uuid.uuid4())
-        merged_path = temp_dir / f"{output_id}_merged.mp4"
-        
-        logger.info(f"Merging video {video_path} with audio {audio_path}")
-        
-        # Use ffmpeg to merge video and audio
-        cmd = [
-            'ffmpeg', '-y',  # -y to overwrite output file
-            '-i', video_path,  # input video
-            '-i', audio_path,  # input audio
-            '-c:v', 'copy',    # copy video codec (no re-encoding)
-            '-c:a', 'aac',     # encode audio to AAC
-            '-strict', 'experimental',
-            '-shortest',       # finish when shortest stream ends
-            str(merged_path)
-        ]
-        
-        # Run ffmpeg command
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, 
-            capture_output=True, 
-            text=True, 
-            timeout=120  # 2 minute timeout for merging
-        )
-        
-        if result.returncode != 0:
-            logger.error(f"FFmpeg failed: {result.stderr}")
-            raise Exception(f"Video-audio merging failed: {result.stderr}")
-        
-        if not merged_path.exists():
-            raise Exception("Merged video file was not created")
-        
-        logger.info(f"Successfully merged video and audio: {merged_path}")
-        return str(merged_path)
-        
-    except Exception as e:
-        logger.error(f"Failed to merge video and audio: {e}")
-        raise Exception(f"Video-audio merging failed: {str(e)}")
-
-async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> str:
-    """Upload video to Supabase storage and return public URL"""
-    try:
-        video_path = Path(local_video_path)
-        if not video_path.exists():
-            raise Exception(f"Video file not found: {local_video_path}")
+        media_path = Path(local_media_path)
+        if not media_path.exists():
+            raise Exception(f"Media file not found: {local_media_path}")
 
         # Generate unique filename for Supabase storage
-        video_id = str(uuid.uuid4())
-        storage_path = f"videos/{sender_uid}/{video_id}.mp4"
+        media_id = str(uuid.uuid4())
+        
+        if media_type == "image":
+            # Determine file extension from the actual file
+            file_extension = media_path.suffix.lower()
+            if not file_extension or file_extension not in ['.jpg', '.jpeg', '.png', '.webp']:
+                file_extension = '.png'  # Default to PNG
+            
+            # Store directly in videos folder with image extension
+            storage_path = f"videos/{sender_uid}/{media_id}{file_extension}"
+            
+            # Determine content type based on extension
+            content_type_map = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg', 
+                '.png': 'image/png',
+                '.webp': 'image/webp'
+            }
+            content_type = content_type_map.get(file_extension, 'image/png')
+        else:
+            # Video file
+            storage_path = f"videos/{sender_uid}/{media_id}.mp4"
+            content_type = "video/mp4"
 
-        # Read video file
-        with open(video_path, "rb") as video_file:
-            video_data = video_file.read()
+        # Read media file
+        with open(media_path, "rb") as media_file:
+            media_data = media_file.read()
 
-        logger.info(f"Uploading video to Supabase: {storage_path}")
+        logger.info(f"Uploading {media_type} to Supabase: {storage_path}")
 
-        # Upload to Supabase storage
+        # Upload to Supabase storage (using same videos bucket)
         try:
             result = supabase.storage.from_("videos").upload(
                 path=storage_path,
-                file=video_data,
+                file=media_data,
                 file_options={
-                    "content-type": "video/mp4",
+                    "content-type": content_type,
                     "cache-control": "3600"
                 }
             )
@@ -331,11 +273,11 @@ async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> s
             raise Exception(f"Failed to get public URL: {url_error}")
 
     except Exception as e:
-        logger.error(f"Failed to upload video to Supabase: {e}")
+        logger.error(f"Failed to upload {media_type} to Supabase: {e}")
         raise Exception(f"Storage upload failed: {str(e)}")
 
-async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, video_url: str, prompt: str):
-    """Save chat messages with video URL to Firebase for each receiver"""
+async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, image_url: str, prompt: str):
+    """Save chat messages with image URL to Firebase for each receiver"""
     try:
         import firebase_admin
         from firebase_admin import credentials, firestore
@@ -358,7 +300,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         ist = pytz.timezone('Asia/Kolkata')
         timestamp = datetime.now(ist)
         
-        logger.info(f"Saving video messages to Firebase for {len(receiver_list)} receivers")
+        logger.info(f"Saving image messages to Firebase for {len(receiver_list)} receivers")
         
         for receiver_id in receiver_list:
             if not receiver_id:  # Skip empty receiver IDs
@@ -367,49 +309,49 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
             try:
                 logger.info(f"Processing message for receiver: {receiver_id}")
                 
-                # Create message document with all required fields for video message
+                # Create message document with all required fields for image message
                 message_data = {
                     "senderId": sender_uid,
                     "receiverId": receiver_id,
                     "text": prompt,  # The prompt as message text
-                    "videoUrl": video_url,  # Supabase video URL - THIS IS KEY FOR VIDEO DISPLAY
-                    "messageType": "video",  # Message type - IMPORTANT for app to know it's a video
+                    "imageUrl": image_url,  # Supabase image URL - THIS IS KEY FOR IMAGE DISPLAY
+                    "messageType": "image",  # Message type - IMPORTANT for app to know it's an image
                     "timestamp": timestamp,
                     "isRead": False,
                     "createdAt": timestamp,
                     "updatedAt": timestamp,
-                    # Additional fields for better video handling
-                    "hasVideo": True,  # Flag to easily identify video messages
-                    "mediaType": "video",  # Explicit media type
-                    "videoStatus": "uploaded"  # Status of video (uploaded, processing, failed)
+                    # Additional fields for better image handling
+                    "hasImage": True,  # Flag to easily identify image messages
+                    "mediaType": "image",  # Explicit media type
+                    "imageStatus": "uploaded"  # Status of image (uploaded, processing, failed)
                 }
                 
                 # Save message to chats/{receiver_id}/messages/ collection
                 doc_ref = db.collection("chats").document(receiver_id).collection("messages").add(message_data)
                 message_id = doc_ref[1].id
-                logger.info(f"Video message saved to chats/{receiver_id}/messages/ with ID: {message_id}")
+                logger.info(f"Image message saved to chats/{receiver_id}/messages/ with ID: {message_id}")
                 
                 # Also save to sender's chat collection for their own reference
                 doc_ref_sender = db.collection("chats").document(sender_uid).collection("messages").add(message_data)
                 sender_message_id = doc_ref_sender[1].id
-                logger.info(f"Video message saved to chats/{sender_uid}/messages/ with ID: {sender_message_id}")
+                logger.info(f"Image message saved to chats/{sender_uid}/messages/ with ID: {sender_message_id}")
                 
                 # Create or update chat document (keeping original chat logic for main chat list)
                 # Use consistent chat ID format (smaller UID first)
                 chat_participants = sorted([sender_uid, receiver_id])
                 chat_id = f"{chat_participants[0]}_{chat_participants[1]}"
                 
-                # Updated chat data with video-specific fields
+                # Updated chat data with image-specific fields
                 chat_data = {
                     "participants": [sender_uid, receiver_id],
                     "participantIds": chat_participants,  # For easier querying
                     "lastMessage": prompt,  # Show prompt as last message preview
-                    "lastMessageType": "video",  # IMPORTANT: Tells app last message was video
+                    "lastMessageType": "image",  # IMPORTANT: Tells app last message was image
                     "lastMessageTimestamp": timestamp,
                     "lastSenderId": sender_uid,
-                    "lastVideoUrl": video_url,  # Store last video URL for quick access
-                    "lastMediaType": "video",  # Explicit media type for last message
-                    "hasUnreadVideo": True,  # Flag for unread video content
+                    "lastImageUrl": image_url,  # Store last image URL for quick access
+                    "lastMediaType": "image",  # Explicit media type for last message
+                    "hasUnreadImage": True,  # Flag for unread image content
                     "updatedAt": timestamp,
                     "unreadCount": {
                         receiver_id: firestore.Increment(1)  # Increment unread count for receiver
@@ -422,80 +364,59 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                 # Check if chat exists
                 chat_doc = chat_ref.get()
                 if chat_doc.exists:
-                    # Update existing chat with video-specific fields
+                    # Update existing chat with image-specific fields
                     update_data = {
                         "lastMessage": prompt,
-                        "lastMessageType": "video",  # Key for app to show video icon/preview
+                        "lastMessageType": "image",  # Key for app to show image icon/preview
                         "lastMessageTimestamp": timestamp,
                         "lastSenderId": sender_uid,
-                        "lastVideoUrl": video_url,  # URL for video preview/thumbnail
-                        "lastMediaType": "video",
-                        "hasUnreadVideo": True,  # Important for showing video notification
+                        "lastImageUrl": image_url,  # URL for image preview/thumbnail
+                        "lastMediaType": "image",
+                        "hasUnreadImage": True,  # Important for showing image notification
                         "updatedAt": timestamp,
                         f"unreadCount.{receiver_id}": firestore.Increment(1)
                     }
                     chat_ref.update(update_data)
-                    logger.info(f"Updated existing chat with video: {chat_id}")
+                    logger.info(f"Updated existing chat with image: {chat_id}")
                 else:
-                    # Create new chat with video data
+                    # Create new chat with image data
                     chat_data["createdAt"] = timestamp
                     chat_data["unreadCount"] = {
                         sender_uid: 0,
                         receiver_id: 1
                     }
                     chat_ref.set(chat_data)
-                    logger.info(f"Created new chat with video: {chat_id}")
+                    logger.info(f"Created new chat with image: {chat_id}")
                 
             except Exception as e:
-                logger.error(f"Failed to save video message for receiver {receiver_id}: {e}")
+                logger.error(f"Failed to save image message for receiver {receiver_id}: {e}")
                 continue  # Continue with other receivers even if one fails
         
-        logger.info("Successfully saved all video messages with URLs to Firebase")
+        logger.info("Successfully saved all image messages with URLs to Firebase")
         
     except Exception as e:
         logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
-        # Don't raise exception here - video generation was successful
+        # Don't raise exception here - image generation was successful
         # Just log the error and continue
 
-def _predict_video(image_path: str, prompt: str):
-    """Synchronous function to call the Gradio client"""
+def _predict_image(image_path: str, prompt: str):
+    """Synchronous function to call the Gradio client for image generation"""
     try:
+        # Modify the prompt to preserve facial appearance
+        enhanced_prompt = f"{prompt} keep the facial appearance same do not change the face"
+        
         return client.predict(
-            prompt=prompt,
-            negative_prompt="worst quality, inconsistent motion, blurry, artifacts",
-            input_image_filepath=handle_file(image_path),
-            input_video_filepath=None,
-            height_ui=960,
-            width_ui=544,
-            mode="image-to-video",
-            duration_ui=2,
-            ui_frames_to_use=9,
-            seed_ui=42,
+            image=handle_file(image_path),
+            prompt=enhanced_prompt,
+            seed=0,
             randomize_seed=True,
-            ui_guidance_scale=5,
-            improve_texture_flag=True,
-            api_name="/image_to_video"
+            true_guidance_scale=2.8,
+            num_inference_steps=8,
+            rewrite_prompt=True,
+            api_name="/infer"
         )
     except Exception as e:
         logger.error(f"Gradio client prediction failed: {e}")
-        raise
-
-def _predict_audio(prompt: str):
-    """Synchronous function to call the Audio Gradio client"""
-    try:
-        audio_prompt = f"generate 2 sec audio for {prompt}"
-        logger.info(f"Generating audio with prompt: {audio_prompt}")
-        
-        result = audio_client.predict(
-            prompt=audio_prompt,
-            api_name="/generate_sound_effect"
-        )
-        
-        logger.info(f"Audio generation result: {result}")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Audio Gradio client prediction failed: {e}")
         raise
 
 @app.exception_handler(Exception)
@@ -511,7 +432,6 @@ if __name__ == "__main__":
         app, 
         host="0.0.0.0", 
         port=8000,
-        timeout_keep_alive=600,  # 5 minutes keep alive
+        timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
