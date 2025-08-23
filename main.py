@@ -147,7 +147,7 @@ async def generate_image(
         
         # Run the prediction with asyncio timeout
         result = await asyncio.wait_for(
-            asyncio.to_thread(_predict_image, str(temp_image_path), prompt),
+            asyncio.to_thread(_predict_video, str(temp_image_path), prompt),
             timeout=300.0  # 5 minutes timeout
         )
 
@@ -399,15 +399,12 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         # Don't raise exception here - image generation was successful
         # Just log the error and continue
 
-def _predict_image(image_path: str, prompt: str):
+def _predict_video(image_path: str, prompt: str):
     """Synchronous function to call the Gradio client for image generation"""
     try:
-        # Modify the prompt to preserve facial appearance
-        enhanced_prompt = f"{prompt} keep the facial appearance same do not change the face"
-        
         return client.predict(
             image=handle_file(image_path),
-            prompt=enhanced_prompt,
+            prompt=prompt,
             seed=0,
             randomize_seed=True,
             true_guidance_scale=2.8,
