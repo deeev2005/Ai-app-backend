@@ -55,7 +55,7 @@ async def startup_event():
         logger.info("Gradio client initialized successfully")
 
         logger.info("Initializing Audio Gradio client...")
-        audio_client = Client("fvbarros/facebook", hf_token=HF_TOKEN)
+        audio_client = Client("chenxie95/MeanAudio", hf_token=HF_TOKEN)
         logger.info("Audio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
@@ -483,16 +483,20 @@ def _predict_video(image_path: str, prompt: str):
 def _predict_audio(prompt: str):
     """Synchronous function to call the Audio Gradio client"""
     try:
-        audio_prompt = f"generate 2 sec audio for {prompt}"
-        logger.info(f"Generating audio with prompt: {audio_prompt}")
+        logger.info(f"Generating audio with prompt: {prompt}")
         
         result = audio_client.predict(
-            prompt=audio_prompt,
-            api_name="/generate_sound_effect"
+            prompt=prompt,
+            duration=5,
+            cfg_strength=4.5,
+            num_steps=1,
+            variant="meanaudio_s_full",
+            seed=42,
+            api_name="/predict"
         )
         
         logger.info(f"Audio generation result: {result}")
-        return result
+        return result[0]  # Return the first element (filepath) from the tuple
         
     except Exception as e:
         logger.error(f"Audio Gradio client prediction failed: {e}")
