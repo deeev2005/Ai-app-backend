@@ -23,12 +23,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")
 
 if not HF_TOKEN:
-logger.error("HF_TOKEN not found in environment variables")
-raise ValueError("HF_TOKEN is required")
+   logger.error("HF_TOKEN not found in environment variables")
+   raise ValueError("HF_TOKEN is required")
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-logger.error("SUPABASE_URL or SUPABASE_SERVICE_KEY not found in environment variables")
-raise ValueError("Supabase credentials are required")
+   logger.error("SUPABASE_URL or SUPABASE_SERVICE_KEY not found in environment variables")
+   raise ValueError("Supabase credentials are required")
 
 app = FastAPI(title="AI Video Generator", version="1.0.0")
 
@@ -533,3 +533,4 @@ port=8000,
 timeout_keep_alive=300,  # 5 minutes keep alive
 timeout_graceful_shutdown=30
 )
+
