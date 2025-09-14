@@ -369,8 +369,8 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
 
                 # Check if receiver_id ends with "(group)"
                 if receiver_id.endswith("(group)"):
-                    # Handle group receiver - create individual chat under group's messages collection
-                    group_id = receiver_id  # The full ID including "(group)"
+                    # Handle group receiver - save to existing group document (remove "(group)" suffix)
+                    group_id = receiver_id.replace("(group)", "")  # Remove the "(group)" suffix
                     
                     # Create message document for group
                     group_message_data = {
@@ -387,7 +387,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                         "videoStatus": "uploaded"
                     }
 
-                    # Save to groups/{group_id}/messages/ as an individual chat document
+                    # Save to groups/{group_id}/messages/ (without "(group)" in the path)
                     doc_ref = db.collection("groups").document(group_id).collection("messages").add(group_message_data)
                     message_id = doc_ref[1].id
                     logger.info(f"Video message saved to groups/{group_id}/messages/ with ID: {message_id}")
