@@ -126,14 +126,14 @@ async def generate_video(
             content = await file.read()
             buffer.write(content)
 
-        # Rotate image 90 degrees clockwise to fix phone orientation
+        # Rotate image 90 degrees anticlockwise to fix phone orientation
         from PIL import Image
         try:
             with Image.open(temp_image_path) as img:
-                # Rotate 90 degrees clockwise (270 degrees counter-clockwise)
-                rotated_img = img.rotate(0, expand=True)
+                # Rotate 90 degrees anticlockwise (90 degrees counter-clockwise)
+                rotated_img = img.rotate(90, expand=True)
                 rotated_img.save(temp_image_path)
-                logger.info(f"Image rotated 90 degrees clockwise")
+                logger.info(f"Image rotated 90 degrees anticlockwise")
         except Exception as e:
             logger.warning(f"Failed to rotate image: {e}, proceeding with original image")
 
@@ -541,4 +541,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
