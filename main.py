@@ -131,7 +131,7 @@ async def generate_video(
         try:
             with Image.open(temp_image_path) as img:
                 # Rotate 90 degrees clockwise (270 degrees counter-clockwise)
-                rotated_img = img.rotate(-90, expand=True)
+                rotated_img = img.rotate(0, expand=True)
                 rotated_img.save(temp_image_path)
                 logger.info(f"Image rotated 90 degrees clockwise")
         except Exception as e:
@@ -541,3 +541,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
