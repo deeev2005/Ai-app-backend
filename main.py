@@ -126,16 +126,19 @@ async def generate_video(
             content = await file.read()
             buffer.write(content)
 
-        # Rotate image 90 degrees anticlockwise to fix phone orientation
-        from PIL import Image
+        # Apply EXIF orientation to ensure photos reach API upright
+        from PIL import Image, ImageOps
         try:
             with Image.open(temp_image_path) as img:
-                # Rotate 90 degrees anticlockwise (90 degrees counter-clockwise)
-                rotated_img = img.rotate(90, expand=True)
-                rotated_img.save(temp_image_path)
-                logger.info(f"Image rotated 90 degrees anticlockwise")
+                # Apply EXIF orientation to correct rotation automatically
+                corrected_img = ImageOps.exif_transpose(img)
+                if corrected_img is None:
+                    # If no EXIF data, use original image
+                    corrected_img = img
+                corrected_img.save(temp_image_path)
+                logger.info(f"Image orientation corrected using EXIF data")
         except Exception as e:
-            logger.warning(f"Failed to rotate image: {e}, proceeding with original image")
+            logger.warning(f"Failed to correct image orientation: {e}, proceeding with original image")
 
         logger.info(f"Image saved to {temp_image_path}")
 
