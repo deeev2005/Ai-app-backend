@@ -615,7 +615,7 @@ def _predict_audio(prompt: str):
             prompt=prompt,
             duration=5,
             cfg_strength=4.5,
-            num_steps=1,
+            num_steps=3,
             variant="meanaudio_s_full",
             seed=42,
             api_name="/predict"
@@ -644,3 +644,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
