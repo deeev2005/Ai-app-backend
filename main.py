@@ -588,7 +588,7 @@ def _predict_video(image_path: str, prompt: str):
     try:
         return client.predict(
             prompt=prompt,
-            negative_prompt="worst quality, inconsistent motion, blurry, artifacts",
+            negative_prompt="worst quality, inconsistent motion, blurry face, artifacts,distorted face,distorted video,distorted motion,blurry video,blur face,changed face,new face,changed facial appearance",
             input_image_filepath=handle_file(image_path),
             input_video_filepath=None,
             height_ui=960,
@@ -644,5 +644,6 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
