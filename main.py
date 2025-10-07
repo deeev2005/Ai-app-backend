@@ -597,7 +597,7 @@ def _predict_video(image_path: str, prompt: str):
             duration_ui=2,
             ui_frames_to_use=9,
             seed_ui=42,
-            randomize_seed=True,
+            randomize_seed=False,
             ui_guidance_scale=5,
             improve_texture_flag=True,
             api_name="/image_to_video"
@@ -644,4 +644,5 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
