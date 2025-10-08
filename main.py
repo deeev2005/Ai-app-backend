@@ -3,6 +3,7 @@ import uuid
 import shutil
 import asyncio
 import logging
+import re
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,6 +90,22 @@ def parse_prompt(prompt: str):
     caption = caption if caption != "^" else None
     
     return magic_prompt, caption
+
+def filter_audio_prompt(prompt: str) -> str:
+    """Remove specific words from prompt before sending to audio API"""
+    # Words to remove (case-insensitive)
+    words_to_remove = ['man', 'person', 'women', 'creature', 'woman', 'men']
+    
+    # Create regex pattern for whole word matching (case-insensitive)
+    pattern = r'\b(' + '|'.join(words_to_remove) + r')\b'
+    
+    # Remove the words
+    filtered_prompt = re.sub(pattern, '', prompt, flags=re.IGNORECASE)
+    
+    # Clean up extra whitespace
+    filtered_prompt = re.sub(r'\s+', ' ', filtered_prompt).strip()
+    
+    return filtered_prompt
 
 @app.post("/generate/")
 async def generate_video(
@@ -609,10 +626,14 @@ def _predict_video(image_path: str, prompt: str):
 def _predict_audio(prompt: str):
     """Synchronous function to call the Audio Gradio client"""
     try:
-        logger.info(f"Generating audio with prompt: {prompt}")
+        # Filter the prompt before sending to audio API
+        filtered_prompt = filter_audio_prompt(prompt)
+        
+        logger.info(f"Original prompt: {prompt}")
+        logger.info(f"Filtered audio prompt: {filtered_prompt}")
         
         result = audio_client.predict(
-            prompt=prompt,
+            prompt=filtered_prompt,  # Use filtered_prompt instead of prompt
             duration=2,
             cfg_strength=4.5,
             num_steps=20,
@@ -644,11 +665,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
-
-
-
-
-
-
