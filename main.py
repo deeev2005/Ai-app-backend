@@ -4,6 +4,7 @@ import shutil
 import asyncio
 import logging
 import re
+import spacy
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,22 +47,27 @@ app.add_middleware(
 client = None
 audio_client = None
 supabase: SupabaseClient = None
+nlp = None
 
 @app.on_event("startup")
 async def startup_event():
-    global client, audio_client, supabase
+    global client, audio_client, supabase, nlp
     try:
         logger.info("Initializing Gradio client...")
         client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
         logger.info("Gradio client initialized successfully")
 
-        logger.info("Initializing Audio Gradio client...")
-        audio_client = Client("chenxie95/MeanAudio", hf_token=HF_TOKEN)
-        logger.info("Audio Gradio client initialized successfully")
+        logger.info("Initializing MMAudio Gradio client...")
+        audio_client = Client("hkchengrex/MMAudio", hf_token=HF_TOKEN)
+        logger.info("MMAudio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         logger.info("Supabase client initialized successfully")
+        
+        logger.info("Loading spaCy model...")
+        nlp = spacy.load("en_core_web_sm")
+        logger.info("spaCy model loaded successfully")
     except Exception as e:
         logger.error(f"Failed to initialize clients: {e}")
         raise
@@ -91,21 +97,28 @@ def parse_prompt(prompt: str):
     
     return magic_prompt, caption
 
-def filter_audio_prompt(prompt: str) -> str:
-    """Remove specific words from prompt before sending to audio API"""
-    # Words to remove (case-insensitive)
-    words_to_remove = ['man', 'person', 'women', 'creature', 'woman', 'men']
+def extract_verbs_and_nouns(prompt: str) -> str:
+    """Extract action verbs and nouns from prompt using spaCy"""
+    if not nlp:
+        logger.warning("spaCy not initialized, returning original prompt")
+        return prompt
     
-    # Create regex pattern for whole word matching (case-insensitive)
-    pattern = r'\b(' + '|'.join(words_to_remove) + r')\b'
+    doc = nlp(prompt)
     
-    # Remove the words
-    filtered_prompt = re.sub(pattern, '', prompt, flags=re.IGNORECASE)
+    # Extract action verbs (VB, VBG, VBD, VBN, VBP, VBZ) and nouns (NN, NNS)
+    tokens = []
+    for token in doc:
+        # Keep action verbs in their original form (not lemmatized)
+        if token.pos_ == "VERB":
+            tokens.append(token.text)
+        # Keep nouns
+        elif token.pos_ == "NOUN":
+            tokens.append(token.text)
     
-    # Clean up extra whitespace
-    filtered_prompt = re.sub(r'\s+', ' ', filtered_prompt).strip()
-    
-    return filtered_prompt
+    # Join with commas and return
+    result = ", ".join(tokens) if tokens else prompt
+    logger.info(f"Extracted tokens from '{prompt}': '{result}'")
+    return result
 
 @app.post("/generate/")
 async def generate_video(
@@ -205,38 +218,35 @@ async def generate_video(
             if audio_client is None:
                 raise HTTPException(status_code=503, detail="AI audio service not available")
 
-            # Start both video and audio generation concurrently
-            logger.info("Starting video and audio generation concurrently...")
+            # Start video generation first
+            logger.info("Starting video generation...")
             
-            # Create tasks for both generations
-            video_task = asyncio.create_task(
-                asyncio.wait_for(
-                    asyncio.to_thread(_predict_video, str(temp_image_path), magic_prompt),
-                    timeout=300.0  # 5 minutes timeout
-                )
+            video_result = await asyncio.wait_for(
+                asyncio.to_thread(_predict_video, str(temp_image_path), magic_prompt),
+                timeout=300.0  # 5 minutes timeout
             )
-
-            audio_task = asyncio.create_task(
-                asyncio.wait_for(
-                    asyncio.to_thread(_predict_audio, magic_prompt),
-                    timeout=300.0  # 5 minutes timeout
-                )
-            )
-
-            # Wait for both tasks to complete
-            video_result, audio_result = await asyncio.gather(video_task, audio_task)
 
             if not video_result or len(video_result) < 2:
                 raise HTTPException(status_code=500, detail="Invalid response from video AI model")
 
+            local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
+            seed_used = video_result[1] if len(video_result) > 1 else "unknown"
+
+            logger.info(f"Video generated locally: {local_video_path}")
+
+            # Now generate audio using the video file
+            logger.info("Starting audio generation with video...")
+            
+            audio_result = await asyncio.wait_for(
+                asyncio.to_thread(_predict_audio, local_video_path, magic_prompt),
+                timeout=300.0  # 5 minutes timeout
+            )
+
             if not audio_result:
                 raise HTTPException(status_code=500, detail="Invalid response from audio AI model")
 
-            local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
-            seed_used = video_result[1] if len(video_result) > 1 else "unknown"
             local_audio_path = audio_result
 
-            logger.info(f"Video generated locally: {local_video_path}")
             logger.info(f"Audio generated locally: {local_audio_path}")
 
             # Merge video and audio
@@ -623,27 +633,35 @@ def _predict_video(image_path: str, prompt: str):
         logger.error(f"Gradio client prediction failed: {e}")
         raise
 
-def _predict_audio(prompt: str):
-    """Synchronous function to call the Audio Gradio client"""
+def _predict_audio(video_path: str, original_prompt: str):
+    """Synchronous function to call the MMAudio Gradio client"""
     try:
-        # Filter the prompt before sending to audio API
-        filtered_prompt = filter_audio_prompt(prompt)
+        # Extract verbs and nouns from the original prompt
+        audio_prompt = extract_verbs_and_nouns(original_prompt)
         
-        logger.info(f"Original prompt: {prompt}")
-        logger.info(f"Filtered audio prompt: {filtered_prompt}")
+        logger.info(f"Original prompt: {original_prompt}")
+        logger.info(f"Audio prompt (verbs + nouns): {audio_prompt}")
         
         result = audio_client.predict(
-            prompt=filtered_prompt,  # Use filtered_prompt instead of prompt
-            duration=2,
-            cfg_strength=10,
+            video={"video": handle_file(video_path)},
+            prompt=audio_prompt,
+            negative_prompt="music",
+            seed=-1,
             num_steps=25,
-            variant="meanaudio_s_full",
-            seed=42,
+            cfg_strength=4.5,
+            duration=2,
             api_name="/predict"
         )
         
         logger.info(f"Audio generation result: {result}")
-        return result[0]  # Return the first element (filepath) from the tuple
+        
+        # Extract the audio file path from the result
+        if isinstance(result, dict) and "video" in result:
+            return result["video"]
+        elif isinstance(result, str):
+            return result
+        else:
+            raise Exception(f"Unexpected audio result format: {result}")
         
     except Exception as e:
         logger.error(f"Audio Gradio client prediction failed: {e}")
@@ -665,5 +683,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
