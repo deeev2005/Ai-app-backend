@@ -4,7 +4,6 @@ import shutil
 import asyncio
 import logging
 import re
-import spacy
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,27 +46,22 @@ app.add_middleware(
 client = None
 audio_client = None
 supabase: SupabaseClient = None
-nlp = None
 
 @app.on_event("startup")
 async def startup_event():
-    global client, audio_client, supabase, nlp
+    global client, audio_client, supabase
     try:
         logger.info("Initializing Gradio client...")
         client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
         logger.info("Gradio client initialized successfully")
 
-        logger.info("Initializing MMAudio Gradio client...")
+        logger.info("Initializing Audio Gradio client...")
         audio_client = Client("hkchengrex/MMAudio", hf_token=HF_TOKEN)
-        logger.info("MMAudio Gradio client initialized successfully")
+        logger.info("Audio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
         logger.info("Supabase client initialized successfully")
-        
-        logger.info("Loading spaCy model...")
-        nlp = spacy.load("en_core_web_sm")
-        logger.info("spaCy model loaded successfully")
     except Exception as e:
         logger.error(f"Failed to initialize clients: {e}")
         raise
@@ -98,26 +92,66 @@ def parse_prompt(prompt: str):
     return magic_prompt, caption
 
 def extract_verbs_and_nouns(prompt: str) -> str:
-    """Extract action verbs and nouns from prompt using spaCy"""
-    if not nlp:
-        logger.warning("spaCy not initialized, returning original prompt")
-        return prompt
+    """Extract action verbs and nouns from prompt using hardcoded lists (case-insensitive)"""
+    # Hardcoded list of common action verbs (in gerund form for actions)
+    action_verbs = [
+        'running', 'walking', 'jumping', 'dancing', 'singing', 'playing', 'eating', 
+        'drinking', 'swimming', 'flying', 'driving', 'riding', 'sleeping', 'working',
+        'talking', 'laughing', 'crying', 'smiling', 'fighting', 'cooking', 'reading',
+        'writing', 'drawing', 'painting', 'climbing', 'falling', 'sitting', 'standing',
+        'kicking', 'throwing', 'catching', 'shooting', 'exploding', 'burning', 'flowing',
+        'spinning', 'rotating', 'moving', 'shaking', 'vibrating', 'bouncing', 'rolling',
+        'sliding', 'gliding', 'floating', 'sinking', 'rising', 'descending', 'ascending',
+        'run', 'walk', 'jump', 'dance', 'sing', 'play', 'eat', 'drink', 'swim', 'fly',
+        'drive', 'ride', 'sleep', 'work', 'talk', 'laugh', 'cry', 'smile', 'fight',
+        'cook', 'read', 'write', 'draw', 'paint', 'climb', 'fall', 'sit', 'stand',
+        'kick', 'throw', 'catch', 'shoot', 'explode', 'burn', 'flow', 'spin', 'rotate',
+        'move', 'shake', 'vibrate', 'bounce', 'roll', 'slide', 'glide', 'float', 'sink'
+    ]
     
-    doc = nlp(prompt)
+    # Hardcoded list of common nouns for sound effects
+    nouns = [
+        'water', 'fire', 'wind', 'thunder', 'rain', 'snow', 'ice', 'storm', 'lightning',
+        'ocean', 'river', 'waterfall', 'wave', 'bird', 'dog', 'cat', 'horse', 'car',
+        'truck', 'plane', 'helicopter', 'train', 'boat', 'ship', 'motorcycle', 'bicycle',
+        'drum', 'guitar', 'piano', 'bell', 'horn', 'siren', 'alarm', 'clock', 'door',
+        'window', 'glass', 'metal', 'wood', 'stone', 'rock', 'explosion', 'gunshot',
+        'footsteps', 'crowd', 'applause', 'laughter', 'scream', 'whistle', 'wind chime',
+        'rain drop', 'heartbeat', 'breathing', 'coughing', 'sneezing', 'roar', 'growl',
+        'chirp', 'meow', 'bark', 'neigh', 'moo', 'quack', 'tweet', 'buzz', 'hiss',
+        'crackle', 'splash', 'drip', 'swoosh', 'whoosh', 'thud', 'crash', 'bang',
+        'clang', 'ding', 'ring', 'beep', 'honk', 'screech', 'rumble', 'roar'
+    ]
     
-    # Extract action verbs (VB, VBG, VBD, VBN, VBP, VBZ) and nouns (NN, NNS)
-    tokens = []
-    for token in doc:
-        # Keep action verbs in their original form (not lemmatized)
-        if token.pos_ == "VERB":
-            tokens.append(token.text)
-        # Keep nouns
-        elif token.pos_ == "NOUN":
-            tokens.append(token.text)
+    # Convert prompt to lowercase for case-insensitive matching
+    prompt_lower = prompt.lower()
     
-    # Join with commas and return
-    result = ", ".join(tokens) if tokens else prompt
-    logger.info(f"Extracted tokens from '{prompt}': '{result}'")
+    # Extract matching verbs and nouns
+    found_words = []
+    
+    # Check for verbs
+    for verb in action_verbs:
+        # Use word boundary to match whole words only
+        if re.search(r'\b' + re.escape(verb) + r'\b', prompt_lower):
+            found_words.append(verb)
+    
+    # Check for nouns
+    for noun in nouns:
+        if re.search(r'\b' + re.escape(noun) + r'\b', prompt_lower):
+            found_words.append(noun)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_words = []
+    for word in found_words:
+        if word not in seen:
+            seen.add(word)
+            unique_words.append(word)
+    
+    # Join with commas
+    result = ', '.join(unique_words) if unique_words else prompt
+    
+    logger.info(f"Extracted audio prompt: {result}")
     return result
 
 @app.post("/generate/")
@@ -246,7 +280,6 @@ async def generate_video(
                 raise HTTPException(status_code=500, detail="Invalid response from audio AI model")
 
             local_audio_path = audio_result
-
             logger.info(f"Audio generated locally: {local_audio_path}")
 
             # Merge video and audio
@@ -633,14 +666,14 @@ def _predict_video(image_path: str, prompt: str):
         logger.error(f"Gradio client prediction failed: {e}")
         raise
 
-def _predict_audio(video_path: str, original_prompt: str):
+def _predict_audio(video_path: str, prompt: str):
     """Synchronous function to call the MMAudio Gradio client"""
     try:
-        # Extract verbs and nouns from the original prompt
-        audio_prompt = extract_verbs_and_nouns(original_prompt)
+        # Extract verbs and nouns from the prompt
+        audio_prompt = extract_verbs_and_nouns(prompt)
         
-        logger.info(f"Original prompt: {original_prompt}")
-        logger.info(f"Audio prompt (verbs + nouns): {audio_prompt}")
+        logger.info(f"Original prompt: {prompt}")
+        logger.info(f"Audio prompt (extracted): {audio_prompt}")
         
         result = audio_client.predict(
             video={"video": handle_file(video_path)},
@@ -658,10 +691,8 @@ def _predict_audio(video_path: str, original_prompt: str):
         # Extract the audio file path from the result
         if isinstance(result, dict) and "video" in result:
             return result["video"]
-        elif isinstance(result, str):
-            return result
         else:
-            raise Exception(f"Unexpected audio result format: {result}")
+            return result
         
     except Exception as e:
         logger.error(f"Audio Gradio client prediction failed: {e}")
