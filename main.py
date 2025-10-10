@@ -361,7 +361,7 @@ def _enhance_prompt(prompt: str) -> str:
     try:
         result = superprompt_client.predict(
             prompt,  # str in 'Your Prompt' Textbox component
-            "Expand the following prompt to add more detail do not try to change the facial appearance of the person or any other noun from the prompt",  # str in 'Task Prefix' Textbox component
+            "Expand the following prompt to add more detail do not try to change the body",  # str in 'Task Prefix' Textbox component
             39,  # Max New Tokens
             2,  # Repetition Penalty
             1,  # Temperature
@@ -759,3 +759,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
