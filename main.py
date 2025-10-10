@@ -43,17 +43,22 @@ app.add_middleware(
 )
 
 # Global clients
-client = None
+wan_client = None
+superprompt_client = None
 audio_client = None
 supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global client, audio_client, supabase
+    global wan_client, superprompt_client, audio_client, supabase
     try:
-        logger.info("Initializing Gradio client...")
-        client = Client("Lightricks/ltx-video-distilled", hf_token=HF_TOKEN)
-        logger.info("Gradio client initialized successfully")
+        logger.info("Initializing WAN Video client...")
+        wan_client = Client("VirtualKimi/wan2-2-5b-fast-t2v-i2v-t2i", hf_token=HF_TOKEN)
+        logger.info("WAN Video client initialized successfully")
+
+        logger.info("Initializing SuperPrompt client...")
+        superprompt_client = Client("cocktailpeanut/SuperPrompt-v1", hf_token=HF_TOKEN)
+        logger.info("SuperPrompt client initialized successfully")
 
         logger.info("Initializing Audio Gradio client...")
         audio_client = Client("hkchengrex/MMAudio", hf_token=HF_TOKEN)
@@ -71,7 +76,8 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy", 
-        "client_ready": client is not None,
+        "wan_client_ready": wan_client is not None,
+        "superprompt_client_ready": superprompt_client is not None,
         "audio_client_ready": audio_client is not None,
         "supabase_ready": supabase is not None
     }
@@ -246,29 +252,40 @@ async def generate_video(
         else:
             # Process with API
             # Check if clients are available
-            if client is None:
+            if wan_client is None:
                 raise HTTPException(status_code=503, detail="AI video service not available")
+            
+            if superprompt_client is None:
+                raise HTTPException(status_code=503, detail="AI prompt enhancement service not available")
             
             if audio_client is None:
                 raise HTTPException(status_code=503, detail="AI audio service not available")
 
-            # Start video generation first
-            logger.info("Starting video generation...")
+            # Step 1: Enhance prompt with SuperPrompt
+            logger.info("Enhancing prompt with SuperPrompt...")
+            enhanced_prompt = await asyncio.wait_for(
+                asyncio.to_thread(_enhance_prompt, magic_prompt),
+                timeout=60.0  # 1 minute timeout for prompt enhancement
+            )
+            logger.info(f"Enhanced prompt: {enhanced_prompt}")
+
+            # Step 2: Generate video with WAN API
+            logger.info("Starting video generation with WAN API...")
             
             video_result = await asyncio.wait_for(
-                asyncio.to_thread(_predict_video, str(temp_image_path), magic_prompt),
+                asyncio.to_thread(_predict_video_wan, str(temp_image_path), enhanced_prompt),
                 timeout=300.0  # 5 minutes timeout
             )
 
             if not video_result or len(video_result) < 2:
-                raise HTTPException(status_code=500, detail="Invalid response from video AI model")
+                raise HTTPException(status_code=500, detail="Invalid response from WAN video AI model")
 
             local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
             seed_used = video_result[1] if len(video_result) > 1 else "unknown"
 
             logger.info(f"Video generated locally: {local_video_path}")
 
-            # Now generate audio using the video file
+            # Step 3: Generate audio using the video file (using original prompt)
             logger.info("Starting audio generation with video...")
             
             audio_result = await asyncio.wait_for(
@@ -282,11 +299,11 @@ async def generate_video(
             local_audio_path = audio_result
             logger.info(f"Audio generated locally: {local_audio_path}")
 
-            # Merge video and audio
+            # Step 4: Merge video and audio
             merged_video_path = await _merge_video_audio(local_video_path, local_audio_path)
             logger.info(f"Video and audio merged: {merged_video_path}")
 
-            # Upload merged video to Supabase storage
+            # Step 5: Upload merged video to Supabase storage
             video_url = await _upload_video_to_supabase(merged_video_path, sender_uid)
             logger.info(f"Merged video uploaded to Supabase: {video_url}")
 
@@ -330,6 +347,49 @@ async def generate_video(
                     logger.info(f"Cleaned up temp file: {temp_path}")
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
+
+def _enhance_prompt(prompt: str) -> str:
+    """Enhance prompt using SuperPrompt API"""
+    try:
+        result = superprompt_client.predict(
+            prompt,  # str in 'Your Prompt' Textbox component
+            "Expand the following prompt to add more detail do not try to change the facial appearance of the person or any other noun from the prompt",  # str in 'Task Prefix' Textbox component
+            39,  # Max New Tokens
+            2,  # Repetition Penalty
+            1,  # Temperature
+            "fp16",  # Model Precision Type
+            1.5,  # Top P
+            100,  # Top K
+            0,  # Seed
+            api_name="/predict"
+        )
+        
+        logger.info(f"SuperPrompt result: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"SuperPrompt enhancement failed: {e}, using original prompt")
+        return prompt  # Fallback to original prompt if enhancement fails
+
+def _predict_video_wan(image_path: str, prompt: str):
+    """Generate video using WAN API"""
+    try:
+        return wan_client.predict(
+            prompt=prompt,
+            height=960,
+            width=544,
+            input_image=handle_file(image_path),
+            negative_prompt="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards, watermark, text, signature",
+            duration_seconds=5,
+            guidance_scale=2,
+            steps=4,
+            seed=42,
+            randomize_seed=True,
+            api_name="/generate_video"
+        )
+    except Exception as e:
+        logger.error(f"WAN video generation failed: {e}")
+        raise
 
 async def _upload_image_to_supabase(local_image_path: str, sender_uid: str) -> str:
     """Upload image to Supabase storage and return public URL"""
@@ -643,29 +703,6 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         # Don't raise exception here - video generation was successful
         # Just log the error and continue
 
-def _predict_video(image_path: str, prompt: str):
-    """Synchronous function to call the Gradio client"""
-    try:
-        return client.predict(
-            prompt=prompt,
-            negative_prompt="worst quality, inconsistent motion, blurry face, artifacts,distorted face,distorted video,distorted motion,blurry video,blur face,changed face,new face,changed facial appearance",
-            input_image_filepath=handle_file(image_path),
-            input_video_filepath=None,
-            height_ui=960,
-            width_ui=544,
-            mode="image-to-video",
-            duration_ui=4,
-            ui_frames_to_use=9,
-            seed_ui=42,
-            randomize_seed=True,
-            ui_guidance_scale=10,
-            improve_texture_flag=True,
-            api_name="/image_to_video"
-        )
-    except Exception as e:
-        logger.error(f"Gradio client prediction failed: {e}")
-        raise
-
 def _predict_audio(video_path: str, prompt: str):
     """Synchronous function to call the MMAudio Gradio client"""
     try:
@@ -678,11 +715,11 @@ def _predict_audio(video_path: str, prompt: str):
         result = audio_client.predict(
             video={"video": handle_file(video_path)},
             prompt=audio_prompt,
-            negative_prompt="music",
+            negative_prompt="music,artifacts,fuzzy audio,distortion",
             seed=-1,
             num_steps=25,
             cfg_strength=4.5,
-            duration=4,
+            duration=5,
             api_name="/predict"
         )
         
@@ -714,4 +751,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
