@@ -74,8 +74,16 @@ async def startup_event():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    all_ready = (
+        wan_client is not None and 
+        superprompt_client is not None and 
+        audio_client is not None and 
+        supabase is not None
+    )
+    
     return {
         "status": "healthy", 
+        "client_ready": all_ready,
         "wan_client_ready": wan_client is not None,
         "superprompt_client_ready": superprompt_client is not None,
         "audio_client_ready": audio_client is not None,
@@ -699,7 +707,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         logger.info("Successfully saved all messages to Firebase")
 
     except Exception as e:
-        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
+        loggerlogger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
         # Don't raise exception here - video generation was successful
         # Just log the error and continue
 
