@@ -57,7 +57,7 @@ async def startup_event():
         logger.info("WAN Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
-        superprompt_client = Client("cocktailpeanut/SuperPrompt-v1", hf_token=HF_TOKEN)
+        superprompt_client = Client("Nick088/SuperPrompt-v1", hf_token=HF_TOKEN)
         logger.info("SuperPrompt client initialized successfully")
 
         logger.info("Initializing Audio Gradio client...")
