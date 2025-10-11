@@ -387,10 +387,10 @@ def _predict_video_wan(image_path: str, prompt: str):
             height=960,
             width=544,
             input_image=handle_file(image_path),
-            negative_prompt="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards, watermark, text, signature",
+            negative_prompt="worst quality, low quality, blurry, out of focus, overexposed, underexposed, flat lighting, bad composition, distorted perspective, messy background, pixelated, jpeg artifacts, watermark, logo, text, signature, artifacts, compression noise, chromatic aberration, harsh shadows, posterization, aliasing, washed out colors, unnatural skin tones, muddy colors, discolored, monotone, over-saturated, low contrast, inconsistent shading, low resolution, grainy texture, smudged details, rough edges, extra limbs, extra fingers, fused fingers, malformed hands, poorly drawn hands, disfigured face, asymmetrical eyes, broken anatomy, disconnected limbs, unnatural proportions, stiff pose, floating objects, missing limbs, cropped body, cut-off head, awkward pose, deformed body, misshapen eyes, incorrect depth, uncanny valley, static frame, incomplete render, unfinished sketch, bad art, bad anatomy, 3D render artifacts, doll-like face, too many details, messy linework, unintentional abstraction, double exposure, random text, inconsistent lighting, excessive highlights, ghosting, reflections, mirrored artifacts, bad perspective, visual clutter, lack of focal point",
             duration_seconds=5,
-            guidance_scale=2,
-            steps=4,
+            guidance_scale=2.5,
+            steps=6,
             seed=42,
             randomize_seed=True,
             api_name="/generate_video"
@@ -759,5 +759,6 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
