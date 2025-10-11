@@ -361,12 +361,12 @@ def _enhance_prompt(prompt: str) -> str:
     try:
         result = superprompt_client.predict(
             prompt,  # str in 'Your Prompt' Textbox component
-            "Expand the following prompt to add more detail do not try to change the body",  # str in 'Task Prefix' Textbox component
-            39,  # Max New Tokens
+            "Expand the following prompt to add more detail ",  # str in 'Task Prefix' Textbox component
+            40,  # Max New Tokens
             2,  # Repetition Penalty
-            1,  # Temperature
+            0.9,  # Temperature
             "fp16",  # Model Precision Type
-            1.5,  # Top P
+            0.5,  # Top P
             100,  # Top K
             0,  # Seed
             api_name="/predict"
@@ -759,4 +759,5 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
