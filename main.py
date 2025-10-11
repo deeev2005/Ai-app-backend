@@ -53,7 +53,7 @@ async def startup_event():
     global wan_client, superprompt_client, audio_client, supabase
     try:
         logger.info("Initializing WAN Video client...")
-        wan_client = Client("VirtualKimi/wan2-2-5b-fast-t2v-i2v-t2i", hf_token=HF_TOKEN)
+        wan_client = Client("zerogpu-aoti/wan2-2-fp8da-aoti-faster", hf_token=HF_TOKEN)
         logger.info("WAN Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
@@ -383,14 +383,13 @@ def _predict_video_wan(image_path: str, prompt: str):
     """Generate video using WAN API"""
     try:
         return wan_client.predict(
-            prompt=prompt,
-            height=960,
-            width=544,
             input_image=handle_file(image_path),
-            negative_prompt="worst quality, low quality, blurry, out of focus, overexposed, underexposed, flat lighting, bad composition, distorted perspective, messy background, pixelated, jpeg artifacts, watermark, logo, text, signature, artifacts, compression noise, chromatic aberration, harsh shadows, posterization, aliasing, washed out colors, unnatural skin tones, muddy colors, discolored, monotone, over-saturated, low contrast, inconsistent shading, low resolution, grainy texture, smudged details, rough edges, extra limbs, extra fingers, fused fingers, malformed hands, poorly drawn hands, disfigured face, asymmetrical eyes, broken anatomy, disconnected limbs, unnatural proportions, stiff pose, floating objects, missing limbs, cropped body, cut-off head, awkward pose, deformed body, misshapen eyes, incorrect depth, uncanny valley, static frame, incomplete render, unfinished sketch, bad art, bad anatomy, 3D render artifacts, doll-like face, too many details, messy linework, unintentional abstraction, double exposure, random text, inconsistent lighting, excessive highlights, ghosting, reflections, mirrored artifacts, bad perspective, visual clutter, lack of focal point",
-            duration_seconds=5,
-            guidance_scale=2.5,
+            prompt=prompt,
             steps=6,
+            negative_prompt="色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, 整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, 画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, 静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走",
+            duration_seconds=5,
+            guidance_scale=1,
+            guidance_scale_2=1,
             seed=42,
             randomize_seed=True,
             api_name="/generate_video"
@@ -707,7 +706,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
         logger.info("Successfully saved all messages to Firebase")
 
     except Exception as e:
-        loggerlogger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
+        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
         # Don't raise exception here - video generation was successful
         # Just log the error and continue
 
@@ -759,8 +758,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
-
-
-
