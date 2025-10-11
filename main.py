@@ -367,7 +367,7 @@ def _enhance_prompt(prompt: str) -> str:
             0.9,  # Temperature
             "fp16",  # Model Precision Type
             0.5,  # Top P
-            100,  # Top K
+            80,  # Top K
             0,  # Seed
             api_name="/predict"
         )
@@ -759,6 +759,7 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
 
