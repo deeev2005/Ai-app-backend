@@ -364,7 +364,7 @@ def _enhance_prompt(prompt: str) -> str:
             "Expand the following prompt to add more detail ",  # str in 'Task Prefix' Textbox component
             40,  # Max New Tokens
             2,  # Repetition Penalty
-            0.9,  # Temperature
+            0.55,  # Temperature
             "fp16",  # Model Precision Type
             0.5,  # Top P
             80,  # Top K
@@ -759,6 +759,7 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
 
