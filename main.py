@@ -53,7 +53,7 @@ async def startup_event():
     global wan_client, superprompt_client, audio_client, supabase
     try:
         logger.info("Initializing WAN Video client...")
-        wan_client = Client("zerogpu-aoti/wan2-2-fp8da-aoti-faster", hf_token=HF_TOKEN)
+        wan_client = Client("ginigen/Wan-2.2-Enhanced", hf_token=HF_TOKEN)
         logger.info("WAN Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
@@ -380,18 +380,17 @@ def _enhance_prompt(prompt: str) -> str:
         return prompt  # Fallback to original prompt if enhancement fails
 
 def _predict_video_wan(image_path: str, prompt: str):
-    """Generate video using WAN API"""
+    """Generate video using WAN API with 704*1280 resolution"""
     try:
         return wan_client.predict(
-            input_image=handle_file(image_path),
+            image=handle_file(image_path),
             prompt=prompt,
-            steps=6,
-            negative_prompt="色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, 整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, 画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, 静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走",
-            duration_seconds=5,
-            guidance_scale=1,
-            guidance_scale_2=1,
-            seed=42,
-            randomize_seed=True,
+            size="704*1280",
+            duration_seconds=2,
+            sampling_steps=38,
+            guide_scale=5,
+            shift=5,
+            seed=-1,
             api_name="/generate_video"
         )
     except Exception as e:
