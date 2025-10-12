@@ -53,7 +53,7 @@ async def startup_event():
     global wan_client, superprompt_client, audio_client, supabase
     try:
         logger.info("Initializing WAN Video client...")
-        wan_client = Client("ginigen/Wan-2.2-Enhanced", hf_token=HF_TOKEN)
+        wan_client = Client("Heartsync/wan2-1-fast-security", hf_token=HF_TOKEN)
         logger.info("WAN Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
@@ -380,17 +380,19 @@ def _enhance_prompt(prompt: str) -> str:
         return prompt  # Fallback to original prompt if enhancement fails
 
 def _predict_video_wan(image_path: str, prompt: str):
-    """Generate video using WAN API with 704*1280 resolution"""
+    """Generate video using WAN API"""
     try:
         return wan_client.predict(
-            image=handle_file(image_path),
+            input_image=handle_file(image_path),
             prompt=prompt,
-            size="704*1280",
+            height=960,
+            width=544,
+            negative_prompt="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards, watermark, text, signature",
             duration_seconds=5,
-            sampling_steps=10,
-            guide_scale=5,
-            shift=5,
-            seed=-1,
+            guidance_scale=1,
+            steps=4,
+            seed=42,
+            randomize_seed=True,
             api_name="/generate_video"
         )
     except Exception as e:
@@ -757,6 +759,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
-
