@@ -387,7 +387,7 @@ def _predict_video_wan(image_path: str, prompt: str):
             prompt=prompt,
             size="704*1280",
             duration_seconds=5,
-            sampling_steps=38,
+            sampling_steps=4,
             guide_scale=5,
             shift=5,
             seed=-1,
@@ -757,4 +757,5 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
