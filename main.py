@@ -53,7 +53,7 @@ async def startup_event():
     global wan_client, superprompt_client, audio_client, supabase
     try:
         logger.info("Initializing WAN Video client...")
-        wan_client = Client("multimodalart/wan2-1-fast", hf_token=HF_TOKEN)
+        wan_client = Client("nevaehsnuggets/Wan_FusionX_with_Loras_dup_2", hf_token=HF_TOKEN)
         logger.info("WAN Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
@@ -387,13 +387,16 @@ def _predict_video_wan(image_path: str, prompt: str):
             prompt=prompt,
             height=960,
             width=544,
-            negative_prompt="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards, watermark, text, signature",
-            duration_seconds=3.4,
-            guidance_scale=1,
+            negative_prompt="Static image, no motion, blurred details, low quality, incomplete, messy background, text, signature",
+            duration_seconds=5,
+            guidance_scale=7.5,
             steps=4,
             seed=42,
             randomize_seed=True,
-            api_name="/generate_video"
+            preset_name="None",
+            lora_weight=0.8,
+            fps=12,
+            api_name="/generate_i2v_video"
         )
     except Exception as e:
         logger.error(f"WAN video generation failed: {e}")
@@ -759,4 +762,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
