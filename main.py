@@ -53,7 +53,7 @@ async def startup_event():
     global wan_client, superprompt_client, audio_client, supabase
     try:
         logger.info("Initializing WAN Video client...")
-        wan_client = Client("nevaehsnuggets/Wan_FusionX_with_Loras_dup_2", hf_token=HF_TOKEN)
+        wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", hf_token=HF_TOKEN)
         logger.info("WAN Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
@@ -385,18 +385,14 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            height=960,
-            width=544,
+            steps=4,
             negative_prompt="Static image, no motion, blurred details, low quality, incomplete, messy background, text, signature",
             duration_seconds=5,
-            guidance_scale=7.5,
-            steps=4,
+            guidance_scale=1,
+            guidance_scale_2=1,
             seed=42,
             randomize_seed=True,
-            preset_name="None",
-            lora_weight=0.8,
-            fps=12,
-            api_name="/generate_i2v_video"
+            api_name="/generate_video"
         )
     except Exception as e:
         logger.error(f"WAN video generation failed: {e}")
@@ -566,7 +562,64 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                 cred = credentials.Certificate("/etc/secrets/services")
                 firebase_admin.initialize_app(cred)
             except Exception as e:
-                logger.error(f"Failed to initialize Firebase with service account: {e}")
+                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
+                continue  # Continue with other receivers even if one fails
+
+        logger.info("Successfully saved all messages to Firebase")
+
+    except Exception as e:
+        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
+        # Don't raise exception here - video generation was successful
+        # Just log the error and continue
+
+def _predict_audio(video_path: str, prompt: str):
+    """Synchronous function to call the MMAudio Gradio client"""
+    try:
+        # Extract verbs and nouns from the prompt
+        audio_prompt = extract_verbs_and_nouns(prompt)
+        
+        logger.info(f"Original prompt: {prompt}")
+        logger.info(f"Audio prompt (extracted): {audio_prompt}")
+        
+        result = audio_client.predict(
+            video={"video": handle_file(video_path)},
+            prompt=audio_prompt,
+            negative_prompt="music,artifacts,fuzzy audio,distortion",
+            seed=-1,
+            num_steps=25,
+            cfg_strength=4.5,
+            duration=5,
+            api_name="/predict"
+        )
+        
+        logger.info(f"Audio generation result: {result}")
+        
+        # Extract the audio file path from the result
+        if isinstance(result, dict) and "video" in result:
+            return result["video"]
+        else:
+            return result
+        
+    except Exception as e:
+        logger.error(f"Audio Gradio client prediction failed: {e}")
+        raise
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc)}
+    )
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        timeout_keep_alive=300,  # 5 minutes keep alive
+        timeout_graceful_shutdown=30
+    )error(f"Failed to initialize Firebase with service account: {e}")
                 raise Exception("Firebase initialization failed")
 
         db = firestore.client()
@@ -704,61 +757,4 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                         logger.info(f"Created new chat: {chat_id}")
 
             except Exception as e:
-                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
-                continue  # Continue with other receivers even if one fails
-
-        logger.info("Successfully saved all messages to Firebase")
-
-    except Exception as e:
-        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
-        # Don't raise exception here - video generation was successful
-        # Just log the error and continue
-
-def _predict_audio(video_path: str, prompt: str):
-    """Synchronous function to call the MMAudio Gradio client"""
-    try:
-        # Extract verbs and nouns from the prompt
-        audio_prompt = extract_verbs_and_nouns(prompt)
-        
-        logger.info(f"Original prompt: {prompt}")
-        logger.info(f"Audio prompt (extracted): {audio_prompt}")
-        
-        result = audio_client.predict(
-            video={"video": handle_file(video_path)},
-            prompt=audio_prompt,
-            negative_prompt="music,artifacts,fuzzy audio,distortion",
-            seed=-1,
-            num_steps=25,
-            cfg_strength=4.5,
-            duration=5,
-            api_name="/predict"
-        )
-        
-        logger.info(f"Audio generation result: {result}")
-        
-        # Extract the audio file path from the result
-        if isinstance(result, dict) and "video" in result:
-            return result["video"]
-        else:
-            return result
-        
-    except Exception as e:
-        logger.error(f"Audio Gradio client prediction failed: {e}")
-        raise
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
-    )
-
-if __name__ == "__main__":
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        timeout_keep_alive=300,  # 5 minutes keep alive
-        timeout_graceful_shutdown=30
-    )
+                logger.
