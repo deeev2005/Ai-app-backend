@@ -417,9 +417,9 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=6,
+            steps=4,
             negative_prompt="Static image, no motion, blurred details, low quality, incomplete, messy background, text, signature",
-            duration_seconds=3.5,
+            duration_seconds=5,
             guidance_scale=1,
             guidance_scale_2=1,
             seed=42,
@@ -758,3 +758,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
