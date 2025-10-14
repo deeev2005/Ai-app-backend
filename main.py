@@ -354,16 +354,7 @@ async def generate_video(
                     Path(temp_path).unlink()
                     logger.info(f"Cleaned up temp file: {temp_path}")
                 except Exception as e:
-                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
-                continue  # Continue with other receivers even if one fails
-
-
-        logger.info("Successfully saved all messages to Firebase")
-
-    except Exception as e:
-        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
-        # Don't raise exception here - video generation was successful
-        # Just log the error and continue
+                    logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
 
 def _predict_audio(video_path: str, prompt: str):
     """Synchronous function to call the MMAudio Gradio client"""
@@ -396,24 +387,6 @@ def _predict_audio(video_path: str, prompt: str):
     except Exception as e:
         logger.error(f"Audio Gradio client prediction failed: {e}")
         raise
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
-    )
-
-if __name__ == "__main__":
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        timeout_keep_alive=300,  # 5 minutes keep alive
-        timeout_graceful_shutdown=30
-    ) e:
-                    logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
 
 def _enhance_prompt(prompt: str) -> str:
     """Enhance prompt using SuperPrompt API"""
@@ -642,7 +615,7 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                 # Check if receiver_id ends with "(group)"
                 if receiver_id.endswith("(group)"):
                     # Handle group receiver - save to existing group document (remove "(group)" suffix)
-                    group_id = receiver_id.replace("(group)", "")  # Remove the "(group)" suffix
+                    group_id = receiver_id.replace("(group)", "").strip()
                     
                     # Create message document for group
                     group_message_data = {
@@ -758,4 +731,30 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                         chat_ref.set(chat_data)
                         logger.info(f"Created new chat: {chat_id}")
 
-            except Exception as
+            except Exception as e:
+                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
+                continue  # Continue with other receivers even if one fails
+
+        logger.info("Successfully saved all messages to Firebase")
+
+    except Exception as e:
+        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
+        # Don't raise exception here - video generation was successful
+        # Just log the error and continue
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc)}
+    )
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=10000,
+        timeout_keep_alive=300,  # 5 minutes keep alive
+        timeout_graceful_shutdown=30
+    )
