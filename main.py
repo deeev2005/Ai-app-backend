@@ -417,8 +417,8 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=4,
-            negative_prompt="Static image, no motion, blurred details, low quality, incomplete, messy background, text, signature",
+            steps=5,
+            negative_prompt="worst quality, low quality, blurry, out of focus, overexposed, underexposed, flat lighting, bad composition, distorted perspective, messy background, pixelated, jpeg artifacts, watermark, logo, text, signature, artifacts, compression noise, chromatic aberration, harsh shadows, posterization, aliasing, washed out colors, unnatural skin tones, muddy colors, discolored, monotone, over-saturated, low contrast, inconsistent shading, low resolution, grainy texture, smudged details, rough edges, extra limbs, extra fingers, fused fingers, malformed hands, poorly drawn hands, disfigured face, asymmetrical eyes, broken anatomy, disconnected limbs, unnatural proportions, stiff pose, floating objects, missing limbs, cropped body, cut-off head, awkward pose, deformed body, misshapen eyes, incorrect depth, uncanny valley, static frame, incomplete render, unfinished sketch, bad art, bad anatomy, 3D render artifacts, doll-like face, too many details, messy linework, unintentional abstraction, double exposure, random text, inconsistent lighting, excessive highlights, ghosting, reflections, mirrored artifacts, bad perspective, visual clutter, lack of focal point,wavy background",
             duration_seconds=5,
             guidance_scale=1,
             guidance_scale_2=1,
@@ -758,4 +758,5 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
