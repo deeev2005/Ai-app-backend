@@ -357,6 +357,7 @@ async def generate_video(
                 logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
                 continue  # Continue with other receivers even if one fails
 
+
         logger.info("Successfully saved all messages to Firebase")
 
     except Exception as e:
@@ -443,9 +444,9 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=4,
+            steps=6,
             negative_prompt="Static image, no motion, blurred details, low quality, incomplete, messy background, text, signature",
-            duration_seconds=5,
+            duration_seconds=3.5,
             guidance_scale=1,
             guidance_scale_2=1,
             seed=42,
