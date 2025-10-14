@@ -385,10 +385,10 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            height=512,
-            width=896,
+            height=960,
+            width=544,
             negative_prompt="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards, watermark, text, signature",
-            duration_seconds=2,
+            duration_seconds=5,
             guidance_scale=1,
             steps=4,
             seed=42,
@@ -759,3 +759,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
