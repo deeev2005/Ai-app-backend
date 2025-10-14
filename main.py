@@ -52,9 +52,9 @@ supabase: SupabaseClient = None
 async def startup_event():
     global wan_client, superprompt_client, audio_client, supabase
     try:
-        logger.info("Initializing WAN Video client...")
-        wan_client = Client("multimodalart/wan2-1-fast", hf_token=HF_TOKEN)
-        logger.info("WAN Video client initialized successfully")
+        logger.info("Initializing WAN2_2 Video client...")
+        wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", hf_token=HF_TOKEN)
+        logger.info("WAN2_2 Video client initialized successfully")
 
         logger.info("Initializing SuperPrompt client...")
         superprompt_client = Client("Nick088/SuperPrompt-v1", hf_token=HF_TOKEN)
@@ -277,8 +277,8 @@ async def generate_video(
             )
             logger.info(f"Enhanced prompt: {enhanced_prompt}")
 
-            # Step 2: Generate video with WAN API
-            logger.info("Starting video generation with WAN API...")
+            # Step 2: Generate video with WAN2_2 API
+            logger.info("Starting video generation with WAN2_2 API...")
             
             video_result = await asyncio.wait_for(
                 asyncio.to_thread(_predict_video_wan, str(temp_image_path), enhanced_prompt),
@@ -286,7 +286,7 @@ async def generate_video(
             )
 
             if not video_result or len(video_result) < 2:
-                raise HTTPException(status_code=500, detail="Invalid response from WAN video AI model")
+                raise HTTPException(status_code=500, detail="Invalid response from WAN2_2 video AI model")
 
             local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
             seed_used = video_result[1] if len(video_result) > 1 else "unknown"
@@ -354,6 +354,64 @@ async def generate_video(
                     Path(temp_path).unlink()
                     logger.info(f"Cleaned up temp file: {temp_path}")
                 except Exception as e:
+                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
+                continue  # Continue with other receivers even if one fails
+
+        logger.info("Successfully saved all messages to Firebase")
+
+    except Exception as e:
+        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
+        # Don't raise exception here - video generation was successful
+        # Just log the error and continue
+
+def _predict_audio(video_path: str, prompt: str):
+    """Synchronous function to call the MMAudio Gradio client"""
+    try:
+        # Extract verbs and nouns from the prompt
+        audio_prompt = extract_verbs_and_nouns(prompt)
+        
+        logger.info(f"Original prompt: {prompt}")
+        logger.info(f"Audio prompt (extracted): {audio_prompt}")
+        
+        result = audio_client.predict(
+            video={"video": handle_file(video_path)},
+            prompt=audio_prompt,
+            negative_prompt="music,artifacts,fuzzy audio,distortion",
+            seed=-1,
+            num_steps=25,
+            cfg_strength=4.5,
+            duration=5,
+            api_name="/predict"
+        )
+        
+        logger.info(f"Audio generation result: {result}")
+        
+        # Extract the audio file path from the result
+        if isinstance(result, dict) and "video" in result:
+            return result["video"]
+        else:
+            return result
+        
+    except Exception as e:
+        logger.error(f"Audio Gradio client prediction failed: {e}")
+        raise
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc)}
+    )
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        timeout_keep_alive=300,  # 5 minutes keep alive
+        timeout_graceful_shutdown=30
+    ) e:
                     logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
 
 def _enhance_prompt(prompt: str) -> str:
@@ -380,23 +438,22 @@ def _enhance_prompt(prompt: str) -> str:
         return prompt  # Fallback to original prompt if enhancement fails
 
 def _predict_video_wan(image_path: str, prompt: str):
-    """Generate video using WAN API"""
+    """Generate video using WAN2_2 API"""
     try:
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            height=960,
-            width=544,
-            negative_prompt="Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards, watermark, text, signature",
+            steps=4,
+            negative_prompt="Static image, no motion, blurred details, low quality, incomplete, messy background, text, signature",
             duration_seconds=5,
             guidance_scale=1,
-            steps=4,
+            guidance_scale_2=1,
             seed=42,
             randomize_seed=True,
             api_name="/generate_video"
         )
     except Exception as e:
-        logger.error(f"WAN video generation failed: {e}")
+        logger.error(f"WAN2_2 video generation failed: {e}")
         raise
 
 async def _upload_image_to_supabase(local_image_path: str, sender_uid: str) -> str:
@@ -700,63 +757,4 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                         chat_ref.set(chat_data)
                         logger.info(f"Created new chat: {chat_id}")
 
-            except Exception as e:
-                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
-                continue  # Continue with other receivers even if one fails
-
-        logger.info("Successfully saved all messages to Firebase")
-
-    except Exception as e:
-        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
-        # Don't raise exception here - video generation was successful
-        # Just log the error and continue
-
-def _predict_audio(video_path: str, prompt: str):
-    """Synchronous function to call the MMAudio Gradio client"""
-    try:
-        # Extract verbs and nouns from the prompt
-        audio_prompt = extract_verbs_and_nouns(prompt)
-        
-        logger.info(f"Original prompt: {prompt}")
-        logger.info(f"Audio prompt (extracted): {audio_prompt}")
-        
-        result = audio_client.predict(
-            video={"video": handle_file(video_path)},
-            prompt=audio_prompt,
-            negative_prompt="music,artifacts,fuzzy audio,distortion",
-            seed=-1,
-            num_steps=25,
-            cfg_strength=4.5,
-            duration=5,
-            api_name="/predict"
-        )
-        
-        logger.info(f"Audio generation result: {result}")
-        
-        # Extract the audio file path from the result
-        if isinstance(result, dict) and "video" in result:
-            return result["video"]
-        else:
-            return result
-        
-    except Exception as e:
-        logger.error(f"Audio Gradio client prediction failed: {e}")
-        raise
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
-    )
-
-if __name__ == "__main__":
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        timeout_keep_alive=300,  # 5 minutes keep alive
-        timeout_graceful_shutdown=30
-    )
-
+            except Exception as
