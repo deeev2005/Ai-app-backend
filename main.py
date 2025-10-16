@@ -44,21 +44,16 @@ app.add_middleware(
 
 # Global clients
 wan_client = None
-superprompt_client = None
 audio_client = None
 supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global wan_client, superprompt_client, audio_client, supabase
+    global wan_client, audio_client, supabase
     try:
         logger.info("Initializing WAN2_2 Video client...")
         wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", hf_token=HF_TOKEN)
         logger.info("WAN2_2 Video client initialized successfully")
-
-        logger.info("Initializing SuperPrompt client...")
-        superprompt_client = Client("Nick088/SuperPrompt-v1", hf_token=HF_TOKEN)
-        logger.info("SuperPrompt client initialized successfully")
 
         logger.info("Initializing Audio Gradio client...")
         audio_client = Client("hkchengrex/MMAudio", hf_token=HF_TOKEN)
@@ -76,7 +71,6 @@ async def health_check():
     """Health check endpoint"""
     all_ready = (
         wan_client is not None and 
-        superprompt_client is not None and 
         audio_client is not None and 
         supabase is not None
     )
@@ -85,7 +79,6 @@ async def health_check():
         "status": "healthy", 
         "client_ready": all_ready,
         "wan_client_ready": wan_client is not None,
-        "superprompt_client_ready": superprompt_client is not None,
         "audio_client_ready": audio_client is not None,
         "supabase_ready": supabase is not None
     }
@@ -263,25 +256,14 @@ async def generate_video(
             if wan_client is None:
                 raise HTTPException(status_code=503, detail="AI video service not available")
             
-            if superprompt_client is None:
-                raise HTTPException(status_code=503, detail="AI prompt enhancement service not available")
-            
             if audio_client is None:
                 raise HTTPException(status_code=503, detail="AI audio service not available")
 
-            # Step 1: Enhance prompt with SuperPrompt
-            logger.info("Enhancing prompt with SuperPrompt...")
-            enhanced_prompt = await asyncio.wait_for(
-                asyncio.to_thread(_enhance_prompt, magic_prompt),
-                timeout=60.0  # 1 minute timeout for prompt enhancement
-            )
-            logger.info(f"Enhanced prompt: {enhanced_prompt}")
-
-            # Step 2: Generate video with WAN2_2 API
-            logger.info("Starting video generation with WAN2_2 API...")
+            # Generate video with WAN2_2 API using original magic_prompt
+            logger.info(f"Starting video generation with WAN2_2 API using prompt: {magic_prompt}")
             
             video_result = await asyncio.wait_for(
-                asyncio.to_thread(_predict_video_wan, str(temp_image_path), enhanced_prompt),
+                asyncio.to_thread(_predict_video_wan, str(temp_image_path), magic_prompt),
                 timeout=300.0  # 5 minutes timeout
             )
 
@@ -293,7 +275,7 @@ async def generate_video(
 
             logger.info(f"Video generated locally: {local_video_path}")
 
-            # Step 3: Generate audio using the video file (using original prompt)
+            # Generate audio using the video file (using original prompt)
             logger.info("Starting audio generation with video...")
             
             audio_result = await asyncio.wait_for(
@@ -307,11 +289,11 @@ async def generate_video(
             local_audio_path = audio_result
             logger.info(f"Audio generated locally: {local_audio_path}")
 
-            # Step 4: Merge video and audio
+            # Merge video and audio
             merged_video_path = await _merge_video_audio(local_video_path, local_audio_path)
             logger.info(f"Video and audio merged: {merged_video_path}")
 
-            # Step 5: Upload merged video to Supabase storage
+            # Upload merged video to Supabase storage
             video_url = await _upload_video_to_supabase(merged_video_path, sender_uid)
             logger.info(f"Merged video uploaded to Supabase: {video_url}")
 
@@ -388,38 +370,15 @@ def _predict_audio(video_path: str, prompt: str):
         logger.error(f"Audio Gradio client prediction failed: {e}")
         raise
 
-def _enhance_prompt(prompt: str) -> str:
-    """Enhance prompt using SuperPrompt API"""
-    try:
-        result = superprompt_client.predict(
-            prompt,  # str in 'Your Prompt' Textbox component
-            "Expand the following prompt to add more detail ",  # str in 'Task Prefix' Textbox component
-            40,  # Max New Tokens
-            2,  # Repetition Penalty
-            0.55,  # Temperature
-            "fp16",  # Model Precision Type
-            0.5,  # Top P
-            80,  # Top K
-            0,  # Seed
-            api_name="/predict"
-        )
-        
-        logger.info(f"SuperPrompt result: {result}")
-        return result
-        
-    except Exception as e:
-        logger.error(f"SuperPrompt enhancement failed: {e}, using original prompt")
-        return prompt  # Fallback to original prompt if enhancement fails
-
 def _predict_video_wan(image_path: str, prompt: str):
-    """Generate video using WAN2_2 API"""
+    """Generate video using WAN2_2 API with new parameters"""
     try:
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=4,
-            negative_prompt="worst quality, low quality, blurry, out of focus, overexposed, underexposed, flat lighting, bad composition, distorted perspective, messy background, pixelated, jpeg artifacts, watermark, logo, text, signature, artifacts, compression noise, chromatic aberration, harsh shadows, posterization, aliasing, washed out colors, unnatural skin tones, muddy colors, discolored, monotone, over-saturated, low contrast, inconsistent shading, low resolution, grainy texture, smudged details, rough edges, extra limbs, extra fingers, fused fingers, malformed hands, poorly drawn hands, disfigured face, asymmetrical eyes, broken anatomy, disconnected limbs, unnatural proportions, stiff pose, floating objects, missing limbs, cropped body, cut-off head, awkward pose, deformed body, misshapen eyes, incorrect depth, uncanny valley, static frame, incomplete render, unfinished sketch, bad art, bad anatomy, 3D render artifacts, doll-like face, too many details, messy linework, unintentional abstraction, double exposure, random text, inconsistent lighting, excessive highlights, ghosting, reflections, mirrored artifacts, bad perspective, visual clutter, lack of focal point,wavy background",
-            duration_seconds=5,
+            steps=6,
+            negative_prompt="색조 선명, 과다 노출, 정적, 세부 흐림, 자막, 스타일, 작품, 그림, 화면, 정지, 회색조, 최악 품질, 저품질, JPEG 압축, 추함, 불완전, 추가 손가락, 잘못 그려진 손, 잘못 그려진 얼굴, 기형, 변형, 형태 불량 사지, 손가락 융합, 정지 화면, 지저분한 배경, 세 개의 다리, 배경 사람 많음, 뒤로 걷기",
+            duration_seconds=3.5,
             guidance_scale=1,
             guidance_scale_2=1,
             seed=42,
@@ -594,7 +553,32 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                 cred = credentials.Certificate("/etc/secrets/services")
                 firebase_admin.initialize_app(cred)
             except Exception as e:
-                logger.error(f"Failed to initialize Firebase with service account: {e}")
+                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
+                continue  # Continue with other receivers even if one fails
+
+        logger.info("Successfully saved all messages to Firebase")
+
+    except Exception as e:
+        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
+        # Don't raise exception here - video generation was successful
+        # Just log the error and continue
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc)}
+    )
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=10000,
+        timeout_keep_alive=300,  # 5 minutes keep alive
+        timeout_graceful_shutdown=30
+    )"Failed to initialize Firebase with service account: {e}")
                 raise Exception("Firebase initialization failed")
 
         db = firestore.client()
@@ -732,32 +716,4 @@ async def _save_chat_messages_to_firebase(sender_uid: str, receiver_list: list, 
                         logger.info(f"Created new chat: {chat_id}")
 
             except Exception as e:
-                logger.error(f"Failed to save message for receiver {receiver_id}: {e}")
-                continue  # Continue with other receivers even if one fails
-
-        logger.info("Successfully saved all messages to Firebase")
-
-    except Exception as e:
-        logger.error(f"Failed to save chat messages to Firebase: {e}", exc_info=True)
-        # Don't raise exception here - video generation was successful
-        # Just log the error and continue
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
-    )
-
-if __name__ == "__main__":
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=10000,
-        timeout_keep_alive=300,  # 5 minutes keep alive
-        timeout_graceful_shutdown=30
-    )
-
-
-
+                logger.error(f
