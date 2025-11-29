@@ -376,7 +376,7 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=5,
+            steps=4,
             negative_prompt=" multiple bodies,overlapping figures,ghost limbs,duplicate limbs,deformed motion,jitter,unstable motion,morphing face,morphing identity,extra hands,extra head,multiple poses,duplicated person ",
             duration_seconds=3.5,
             guidance_scale=3,
@@ -719,5 +719,6 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
