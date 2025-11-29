@@ -377,10 +377,7 @@ def _predict_video_wan(image_path: str, prompt: str):
             input_image=handle_file(image_path),
             prompt=prompt,
             steps=8,
-            negative_prompt = """
-亮度过高，过曝，模糊细节，字幕，风格化，作品感，绘画风格，静止图像，灰蒙蒙，最差质量，低质量，JPEG压缩痕迹，丑陋，不完整，额外手指，手部画得不好，面部画得不好，变形，畸形，肢体融合，混乱背景，多条腿，多人背景，倒着走，水印，文字，签名，
-색조 선명, 과다 노출, 정적, 세부 흐림, 자막, 스타일, 그림 느낌, 화면 왜곡, 품질 저하, 추가 손가락, 기형 얼굴, 변형, 형태 불량 사지, 손가락 융합, 지저분한 배경, 세 개의 다리, 뒤로 걷기,
-multiple bodies, overlapping bodies, ghosting, duplicate limbs, extra limbs,
+            negative_prompt = """ multiple bodies, overlapping bodies, ghosting, duplicate limbs, extra limbs,
 jitter, unstable motion, warped motion, motion artifacts,
 identity drift, morphing face, morphing identity,
 extra head, extra arms, extra legs,
@@ -729,6 +726,7 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
 
