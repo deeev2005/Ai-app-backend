@@ -377,7 +377,7 @@ def _predict_video_wan(image_path: str, prompt: str):
             input_image=handle_file(image_path),
             prompt=prompt,
             steps=8,
-            negative_prompt="색조 선명, 과다 노출, 정적, 세부 흐림, 자막, 스타일, 작품, 그림, 화면, 정지, 회색조, 최악 품질, 저품질, JPEG 압축, 추함, 불완전, 추가 손가락, 잘못 그려진 손, 잘못 그려진 얼굴, 기형, 변형, 형태 불량 사지, 손가락 융합, 정지 화면, 지저분한 배경, 세 개의 다리, 배경 사람 많음, 뒤로 걷기, multiple bodies,overlapping figures,ghost limbs,duplicate limbs,deformed motion,jitter,unstable motion,morphing face,morphing identity,extra hands,extra head,multiple poses,duplicated person",
+            negative_prompt=" multiple bodies,overlapping figures,ghost limbs,duplicate limbs,deformed motion,jitter,unstable motion,morphing face,morphing identity,extra hands,extra head,multiple poses,duplicated person ",
             duration_seconds=3.5,
             guidance_scale=3,
             guidance_scale_2=3,
