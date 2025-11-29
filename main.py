@@ -52,11 +52,11 @@ async def startup_event():
     global wan_client, audio_client, supabase
     try:
         logger.info("Initializing WAN2_2 Video client...")
-        wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", hf_token=HF_TOKEN)
+        wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", token=HF_TOKEN)
         logger.info("WAN2_2 Video client initialized successfully")
 
         logger.info("Initializing Audio Gradio client...")
-        audio_client = Client("hkchengrex/MMAudio", hf_token=HF_TOKEN)
+        audio_client = Client("hkchengrex/MMAudio", token=HF_TOKEN)
         logger.info("Audio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
@@ -719,3 +719,4 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
