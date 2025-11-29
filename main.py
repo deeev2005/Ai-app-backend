@@ -377,7 +377,17 @@ def _predict_video_wan(image_path: str, prompt: str):
             input_image=handle_file(image_path),
             prompt=prompt,
             steps=8,
-            negative_prompt=""" 색조 선명, 과다 노출, 정적, 세부 흐림, 자막, 스타일, 작품, 그림, 화면, 정지, 회색조, 최악 품질, 저품질, JPEG 압축, 추함, 불완전, 추가 손가락, 잘못 그려진 손, 잘못 그려진 얼굴, 기형, 변형, 형태 불량 사지, 손가락 융합, 정지 화면, 지저분한 배경, 세 개의 다리, 배경 사람 많음, 뒤로 걷, multiple bodies, overlapping bodies, ghosting, duplicate limbs,jitter, unstable movement, morphing identity, extra head, extra arms,multiple poses, fast dancing, energetic dancing, motion blur"""
+            negative_prompt = """
+亮度过高，过曝，模糊细节，字幕，风格化，作品感，绘画风格，静止图像，灰蒙蒙，最差质量，低质量，JPEG压缩痕迹，丑陋，不完整，额外手指，手部画得不好，面部画得不好，变形，畸形，肢体融合，混乱背景，多条腿，多人背景，倒着走，水印，文字，签名，
+색조 선명, 과다 노출, 정적, 세부 흐림, 자막, 스타일, 그림 느낌, 화면 왜곡, 품질 저하, 추가 손가락, 기형 얼굴, 변형, 형태 불량 사지, 손가락 융합, 지저분한 배경, 세 개의 다리, 뒤로 걷기,
+multiple bodies, overlapping bodies, ghosting, duplicate limbs, extra limbs,
+jitter, unstable motion, warped motion, motion artifacts,
+identity drift, morphing face, morphing identity,
+extra head, extra arms, extra legs,
+multiple poses, pose switching, fast dancing, chaotic dancing,
+motion blur, distorted silhouette, unnatural movement
+"""
+
             duration_seconds=3.5,
             guidance_scale=3,
             guidance_scale_2=3,
@@ -719,6 +729,7 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
 
