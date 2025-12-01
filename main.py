@@ -52,7 +52,7 @@ async def startup_event():
     global wan_client, audio_client, supabase
     try:
         logger.info("Initializing WAN2_2 Video client...")
-        wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", token=HF_TOKEN)
+        wan_client = Client("dream2589632147/Dream-wan2-2-faster-Pro", token=HF_TOKEN)
         logger.info("WAN2_2 Video client initialized successfully")
 
         logger.info("Initializing Audio Gradio client...")
@@ -376,13 +376,13 @@ def _predict_video_wan(image_path: str, prompt: str):
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=4,
-            negative_prompt=" multiple bodies, overlapping bodies, ghost limbs, duplicate limbs, jitter, unstable movement, morphing face, morphing identity, extra head, extra arms, multiple poses, fast dancing, energetic dancing, motion blur, identity drift ",
+            steps=6,
+            negative_prompt="low quality, worst quality, motion artifacts, unstable motion, jitter, frame jitter, wobbling limbs, motion distortion, inconsistent movement, robotic movement, animation-like motion, awkward transitions, incorrect body mechanics, unnatural posing, off-balance poses, broken motion paths, frozen frames, duplicated frames, frame skipping, warped motion, stretching artifacts bad anatomy, incorrect proportions, deformed body, twisted torso, broken joints, dislocated limbs, distorted neck, unnatural spine curvature, malformed hands, extra fingers, missing fingers, fused fingers, distorted legs, extra limbs, collapsed feet, floating feet, foot sliding, foot jitter, backward walking, unnatural gait blurry details, long exposure blur, ghosting, shadow trails, smearing, washed-out colors, overexposure, underexposure, excessive contrast, blown highlights, poorly rendered clothing, fabric glitches, texture warping, clothing merging with body, incorrect cloth physics ugly background, cluttered scene, crowded background, random objects, unwanted text, subtitles, logos, graffiti, grain, noise, static artifacts, compression noise, jpeg artifacts, image-like stillness, painting-like look, cartoon texture, low-resolution textures",
             duration_seconds=3.5,
             guidance_scale=1,
             guidance_scale_2=1,
             seed=42,
-            randomize_seed=False,
+            randomize_seed=True,
             api_name="/generate_video"
         )
     except Exception as e:
@@ -719,7 +719,3 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
-
-
-
-
