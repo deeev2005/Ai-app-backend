@@ -377,10 +377,10 @@ def _predict_video_wan(image_path: str, prompt: str):
             input_image=handle_file(image_path),
             prompt=prompt,
             steps=6,
-            negative_prompt=" multiple bodies, overlapping bodies, ghost limbs, duplicate limbs, jitter, unstable movement, morphing face, morphing identity, extra head, extra arms, multiple poses, fast dancing, energetic dancing, motion blur, identity drift,多个身体, 重叠的身体, 幽灵般的肢体, 重复的肢体, 抖动, 不稳定的动作, 变形的脸, 变形的身份, 多余的头部, 多余的手臂, 多个姿势, 快速舞动, 充满活力的舞蹈, 运动模糊, 身份漂移 ",
+            negative_prompt=" multiple bodies, overlapping bodies, ghost limbs, duplicate limbs, jitter, unstable movement, morphing face, morphing identity, extra head, extra arms, multiple poses, fast dancing, energetic dancing, motion blur, identity drift,多个身体, 重叠的身体, 幽灵般的肢体, 重复的肢体, 抖动, 不稳定的动作, 变形的脸, 变形的身份, 多余的头部, 多余的手臂, 多个姿势, 快速舞动, 充满活力的舞蹈, 运动模糊, 身份漂移",
             duration_seconds=3.5,
-            guidance_scale=2,
-            guidance_scale_2=2,
+            guidance_scale=1,
+            guidance_scale_2=1,
             seed=42,
             randomize_seed=False,
             api_name="/generate_video"
@@ -719,6 +719,7 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
 
 
 
