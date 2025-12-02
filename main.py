@@ -44,15 +44,20 @@ app.add_middleware(
 
 # Global clients
 wan_client = None
+audio_client = None
 supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global wan_client, supabase
+    global wan_client, audio_client, supabase
     try:
-        logger.info("Initializing Dream WAN Video client...")
-        wan_client = Client("dream2589632147/Dream-wan2-2-faster-Pro", token=HF_TOKEN)
-        logger.info("Dream WAN Video client initialized successfully")
+        logger.info("Initializing WAN2_2 Video client...")
+        wan_client = Client("Heartsync/wan2_2-I2V-14B-FAST", token=HF_TOKEN)
+        logger.info("WAN2_2 Video client initialized successfully")
+
+        logger.info("Initializing Audio Gradio client...")
+        audio_client = Client("hkchengrex/MMAudio", token=HF_TOKEN)
+        logger.info("Audio Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -66,6 +71,7 @@ async def health_check():
     """Health check endpoint"""
     all_ready = (
         wan_client is not None and 
+        audio_client is not None and 
         supabase is not None
     )
     
@@ -73,6 +79,7 @@ async def health_check():
         "status": "healthy", 
         "client_ready": all_ready,
         "wan_client_ready": wan_client is not None,
+        "audio_client_ready": audio_client is not None,
         "supabase_ready": supabase is not None
     }
 
@@ -91,6 +98,69 @@ def parse_prompt(prompt: str):
     
     return magic_prompt, caption
 
+def extract_verbs_and_nouns(prompt: str) -> str:
+    """Extract action verbs and nouns from prompt using hardcoded lists (case-insensitive)"""
+    # Hardcoded list of common action verbs (in gerund form for actions)
+    action_verbs = [
+        'running', 'walking', 'jumping', 'dancing', 'singing', 'playing', 'eating', 
+        'drinking', 'swimming', 'flying', 'driving', 'riding', 'sleeping', 'working',
+        'talking', 'laughing', 'crying', 'smiling', 'fighting', 'cooking', 'reading',
+        'writing', 'drawing', 'painting', 'climbing', 'falling', 'sitting', 'standing',
+        'kicking', 'throwing', 'catching', 'shooting', 'exploding', 'burning', 'flowing',
+        'spinning', 'rotating', 'moving', 'shaking', 'vibrating', 'bouncing', 'rolling',
+        'sliding', 'gliding', 'floating', 'sinking', 'rising', 'descending', 'ascending',
+        'run', 'walk', 'jump', 'dance', 'sing', 'play', 'eat', 'drink', 'swim', 'fly',
+        'drive', 'ride', 'sleep', 'work', 'talk', 'laugh', 'cry', 'smile', 'fight',
+        'cook', 'read', 'write', 'draw', 'paint', 'climb', 'fall', 'sit', 'stand',
+        'kick', 'throw', 'catch', 'shoot', 'explode', 'burn', 'flow', 'spin', 'rotate',
+        'move', 'shake', 'vibrate', 'bounce', 'roll', 'slide', 'glide', 'float', 'sink'
+    ]
+    
+    # Hardcoded list of common nouns for sound effects
+    nouns = [
+        'water', 'fire', 'wind', 'thunder', 'rain', 'snow', 'ice', 'storm', 'lightning',
+        'ocean', 'river', 'waterfall', 'wave', 'bird', 'dog', 'cat', 'horse', 'car',
+        'truck', 'plane', 'helicopter', 'train', 'boat', 'ship', 'motorcycle', 'bicycle',
+        'drum', 'guitar', 'piano', 'bell', 'horn', 'siren', 'alarm', 'clock', 'door',
+        'window', 'glass', 'metal', 'wood', 'stone', 'rock', 'explosion', 'gunshot',
+        'footsteps', 'crowd', 'applause', 'laughter', 'scream', 'whistle', 'wind chime',
+        'rain drop', 'heartbeat', 'breathing', 'coughing', 'sneezing', 'roar', 'growl',
+        'chirp', 'meow', 'bark', 'neigh', 'moo', 'quack', 'tweet', 'buzz', 'hiss',
+        'crackle', 'splash', 'drip', 'swoosh', 'whoosh', 'thud', 'crash', 'bang',
+        'clang', 'ding', 'ring', 'beep', 'honk', 'screech', 'rumble', 'roar'
+    ]
+    
+    # Convert prompt to lowercase for case-insensitive matching
+    prompt_lower = prompt.lower()
+    
+    # Extract matching verbs and nouns
+    found_words = []
+    
+    # Check for verbs
+    for verb in action_verbs:
+        # Use word boundary to match whole words only
+        if re.search(r'\b' + re.escape(verb) + r'\b', prompt_lower):
+            found_words.append(verb)
+    
+    # Check for nouns
+    for noun in nouns:
+        if re.search(r'\b' + re.escape(noun) + r'\b', prompt_lower):
+            found_words.append(noun)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_words = []
+    for word in found_words:
+        if word not in seen:
+            seen.add(word)
+            unique_words.append(word)
+    
+    # Join with commas
+    result = ', '.join(unique_words) if unique_words else prompt
+    
+    logger.info(f"Extracted audio prompt: {result}")
+    return result
+
 @app.post("/generate/")
 async def generate_video(
     file: UploadFile = File(...),
@@ -98,9 +168,11 @@ async def generate_video(
     sender_uid: str = Form(...),
     receiver_uids: str = Form(...)
 ):
-    """Generate video from image and prompt"""
+    """Generate video from image and prompt, add audio, then merge them"""
     temp_image_path = None
     temp_video_path = None
+    temp_audio_path = None
+    temp_merged_path = None
 
     try:
         # Parse the prompt to extract magic prompt and caption
@@ -183,9 +255,12 @@ async def generate_video(
             # Check if clients are available
             if wan_client is None:
                 raise HTTPException(status_code=503, detail="AI video service not available")
+            
+            if audio_client is None:
+                raise HTTPException(status_code=503, detail="AI audio service not available")
 
-            # Generate video with Dream WAN API using original magic_prompt
-            logger.info(f"Starting video generation with Dream WAN API using prompt: {magic_prompt}")
+            # Generate video with WAN2_2 API using original magic_prompt
+            logger.info(f"Starting video generation with WAN2_2 API using prompt: {magic_prompt}")
             
             video_result = await asyncio.wait_for(
                 asyncio.to_thread(_predict_video_wan, str(temp_image_path), magic_prompt),
@@ -193,16 +268,34 @@ async def generate_video(
             )
 
             if not video_result or len(video_result) < 2:
-                raise HTTPException(status_code=500, detail="Invalid response from Dream WAN video AI model")
+                raise HTTPException(status_code=500, detail="Invalid response from WAN2_2 video AI model")
 
             local_video_path = video_result[0].get("video") if isinstance(video_result[0], dict) else video_result[0]
             seed_used = video_result[1] if len(video_result) > 1 else "unknown"
 
             logger.info(f"Video generated locally: {local_video_path}")
 
-            # Upload video to Supabase storage
-            video_url = await _upload_video_to_supabase(local_video_path, sender_uid)
-            logger.info(f"Video uploaded to Supabase: {video_url}")
+            # Generate audio using the video file (using original prompt)
+            logger.info("Starting audio generation with video...")
+            
+            audio_result = await asyncio.wait_for(
+                asyncio.to_thread(_predict_audio, local_video_path, magic_prompt),
+                timeout=300.0  # 5 minutes timeout
+            )
+
+            if not audio_result:
+                raise HTTPException(status_code=500, detail="Invalid response from audio AI model")
+
+            local_audio_path = audio_result
+            logger.info(f"Audio generated locally: {local_audio_path}")
+
+            # Merge video and audio
+            merged_video_path = await _merge_video_audio(local_video_path, local_audio_path)
+            logger.info(f"Video and audio merged: {merged_video_path}")
+
+            # Upload merged video to Supabase storage
+            video_url = await _upload_video_to_supabase(merged_video_path, sender_uid)
+            logger.info(f"Merged video uploaded to Supabase: {video_url}")
 
         # Save chat messages to Firebase for each receiver
         receiver_list = [uid.strip() for uid in receiver_uids.split(",") if uid.strip()]
@@ -218,10 +311,10 @@ async def generate_video(
         })
 
     except asyncio.TimeoutError:
-        logger.error("Video generation timed out after 5 minutes")
+        logger.error("Video/Audio generation timed out after 5 minutes")
         raise HTTPException(
             status_code=408, 
-            detail="Video generation timed out. Please try with a simpler prompt or smaller image."
+            detail="Video/Audio generation timed out. Please try with a simpler prompt or smaller image."
         )
 
     except HTTPException:
@@ -237,7 +330,7 @@ async def generate_video(
 
     finally:
         # Cleanup temporary files
-        for temp_path in [temp_image_path, temp_video_path]:
+        for temp_path in [temp_image_path, temp_video_path, temp_audio_path, temp_merged_path]:
             if temp_path and Path(temp_path).exists():
                 try:
                     Path(temp_path).unlink()
@@ -245,14 +338,46 @@ async def generate_video(
                 except Exception as e:
                     logger.warning(f"Failed to cleanup temp file {temp_path}: {e}")
 
+def _predict_audio(video_path: str, prompt: str):
+    """Synchronous function to call the MMAudio Gradio client"""
+    try:
+        # Extract verbs and nouns from the prompt
+        audio_prompt = extract_verbs_and_nouns(prompt)
+        
+        logger.info(f"Original prompt: {prompt}")
+        logger.info(f"Audio prompt (extracted): {audio_prompt}")
+        
+        result = audio_client.predict(
+            video={"video": handle_file(video_path)},
+            prompt=audio_prompt,
+            negative_prompt="music,artifacts,fuzzy audio,distortion",
+            seed=-1,
+            num_steps=25,
+            cfg_strength=4.5,
+            duration=5,
+            api_name="/predict"
+        )
+        
+        logger.info(f"Audio generation result: {result}")
+        
+        # Extract the audio file path from the result
+        if isinstance(result, dict) and "video" in result:
+            return result["video"]
+        else:
+            return result
+        
+    except Exception as e:
+        logger.error(f"Audio Gradio client prediction failed: {e}")
+        raise
+
 def _predict_video_wan(image_path: str, prompt: str):
-    """Generate video using Dream WAN API with new parameters"""
+    """Generate video using WAN2_2 API with new parameters"""
     try:
         return wan_client.predict(
             input_image=handle_file(image_path),
             prompt=prompt,
-            steps=6,
-            negative_prompt="low quality, worst quality, motion artifacts, unstable motion, jitter, frame jitter, wobbling limbs, motion distortion, inconsistent movement, robotic movement, animation-like motion, awkward transitions, incorrect body mechanics, unnatural posing, off-balance poses, broken motion paths, frozen frames, duplicated frames, frame skipping, warped motion, stretching artifacts bad anatomy, incorrect proportions, deformed body, twisted torso, broken joints, dislocated limbs, distorted neck, unnatural spine curvature, malformed hands, extra fingers, missing fingers, fused fingers, distorted legs, extra limbs, collapsed feet, floating feet, foot sliding, foot jitter, backward walking, unnatural gait blurry details, long exposure blur, ghosting, shadow trails, smearing, washed-out colors, overexposure, underexposure, excessive contrast, blown highlights, poorly rendered clothing, fabric glitches, texture warping, clothing merging with body, incorrect cloth physics ugly background, cluttered scene, crowded background, random objects, unwanted text, subtitles, logos, graffiti, grain, noise, static artifacts, compression noise, jpeg artifacts, image-like stillness, painting-like look, cartoon texture, low-resolution textures",
+            steps=4,
+            negative_prompt=" multiple bodies, overlapping bodies, ghost limbs, duplicate limbs, jitter, unstable movement, morphing face, morphing identity, extra head, extra arms, multiple poses, fast dancing, energetic dancing, motion blur, identity drift ",
             duration_seconds=3.5,
             guidance_scale=1,
             guidance_scale_2=1,
@@ -261,7 +386,7 @@ def _predict_video_wan(image_path: str, prompt: str):
             api_name="/generate_video"
         )
     except Exception as e:
-        logger.error(f"Dream WAN video generation failed: {e}")
+        logger.error(f"WAN2_2 video generation failed: {e}")
         raise
 
 async def _upload_image_to_supabase(local_image_path: str, sender_uid: str) -> str:
@@ -315,6 +440,52 @@ async def _upload_image_to_supabase(local_image_path: str, sender_uid: str) -> s
     except Exception as e:
         logger.error(f"Failed to upload image to Supabase: {e}")
         raise Exception(f"Storage upload failed: {str(e)}")
+
+async def _merge_video_audio(video_path: str, audio_path: str) -> str:
+    """Merge video and audio files using ffmpeg"""
+    try:
+        import subprocess
+        
+        # Generate output path
+        temp_dir = Path("/tmp")
+        output_id = str(uuid.uuid4())
+        merged_path = temp_dir / f"{output_id}_merged.mp4"
+        
+        logger.info(f"Merging video {video_path} with audio {audio_path}")
+        
+        # Use ffmpeg to merge video and audio
+        cmd = [
+            'ffmpeg', '-y',  # -y to overwrite output file
+            '-i', video_path,  # input video
+            '-i', audio_path,  # input audio
+            '-c:v', 'copy',    # copy video codec (no re-encoding)
+            '-c:a', 'aac',     # encode audio to AAC
+            '-strict', 'experimental',
+            '-shortest',       # finish when shortest stream ends
+            str(merged_path)
+        ]
+        
+        # Run ffmpeg command
+        result = await asyncio.to_thread(
+            subprocess.run, cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=120  # 2 minute timeout for merging
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed: {result.stderr}")
+            raise Exception(f"Video-audio merging failed: {result.stderr}")
+        
+        if not merged_path.exists():
+            raise Exception("Merged video file was not created")
+        
+        logger.info(f"Successfully merged video and audio: {merged_path}")
+        return str(merged_path)
+        
+    except Exception as e:
+        logger.error(f"Failed to merge video and audio: {e}")
+        raise Exception(f"Video-audio merging failed: {str(e)}")
 
 async def _upload_video_to_supabase(local_video_path: str, sender_uid: str) -> str:
     """Upload video to Supabase storage and return public URL"""
@@ -548,3 +719,6 @@ if __name__ == "__main__":
         timeout_keep_alive=300,  # 5 minutes keep alive
         timeout_graceful_shutdown=30
     )
+
+
+
